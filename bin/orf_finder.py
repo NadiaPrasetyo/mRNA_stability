@@ -61,10 +61,16 @@ CSV_HEADER = [
 
 @dataclass(frozen=True)
 class ORFRecord:
-    """One row of output. Coordinates are 1-based inclusive forward-strand."""
+    """
+    One row of output. Coordinates are 1-based inclusive forward-strand.
+
+    Placeholder rows (emitted under --everything for sequences with no ORFs)
+    use strand="" and frame=0; to_csv_row renders both as empty CSV fields,
+    which most downstream tools (pandas etc.) will read as NaN.
+    """
     sequence_id: str
-    strand: str       # '+' or '-'
-    frame: int        # 1, 2, or 3 (relative to the strand)
+    strand: str       # '+', '-', or '' for placeholder rows
+    frame: int        # 1, 2, or 3 (relative to strand); 0 for placeholders
     start: int
     end: int
     length: int
@@ -72,11 +78,30 @@ class ORFRecord:
     total_orfs_in_sequence: int
     sequence_length: int
 
+    @classmethod
+    def no_orf_placeholder(cls, sequence_id: str, sequence_length: int) -> "ORFRecord":
+        """Build the all-zero placeholder row for a sequence with no ORFs."""
+        return cls(
+            sequence_id=sequence_id,
+            strand="",
+            frame=0,
+            start=0,
+            end=0,
+            length=0,
+            length_fraction=0.0,
+            total_orfs_in_sequence=0,
+            sequence_length=sequence_length,
+        )
+
+    @property
+    def is_placeholder(self) -> bool:
+        return self.frame == 0
+
     def to_csv_row(self) -> list:
         return [
             self.sequence_id,
             self.strand,
-            self.frame,
+            "" if self.is_placeholder else self.frame,
             self.start,
             self.end,
             self.length,
@@ -154,18 +179,13 @@ def iter_sequences(file_paths: Iterable) -> Iterator:
     """
     Yield (source_file, sequence_id, sequence) across all input files.
     Per-file IO errors are reported on stderr and skipped, so a single
-    bad file doesn't halt a batch run.
+    bad file doesn't halt a batch run. Empty sequences ARE yielded; the
+    consumer (process_sequence / _pool_worker) decides whether to warn
+    and whether to emit a placeholder row.
     """
     for path in file_paths:
         try:
             for seq_id, seq in parse_fasta(path):
-                if not seq:
-                    print(
-                        f"Warning: skipping empty sequence "
-                        f"{seq_id!r} in {path}",
-                        file=sys.stderr,
-                    )
-                    continue
                 yield path, seq_id, seq
         except OSError as exc:
             print(f"Error reading {path}: {exc}", file=sys.stderr)
@@ -229,10 +249,16 @@ def process_sequence(
     start_codons: frozenset,
     stop_codons: frozenset,
     longest_only: bool,
+    report_no_orf: bool,
 ) -> list:
     """Find all maximal ORFs in a single sequence and return ORFRecord rows."""
     seq_length = len(sequence)
     if seq_length == 0:
+        # Empty sequence: emit a placeholder if --everything was set,
+        # otherwise return nothing. The warning about malformed input is
+        # printed in _pool_worker, which has the source_file context.
+        if report_no_orf:
+            return [ORFRecord.no_orf_placeholder(sequence_id, 0)]
         return []
 
     # Each entry: (strand, frame, start_1based, end_1based, length)
@@ -258,6 +284,8 @@ def process_sequence(
                 raw_hits.append(("-", frame + 1, fwd_start, fwd_end, length))
 
     if not raw_hits:
+        if report_no_orf:
+            return [ORFRecord.no_orf_placeholder(sequence_id, seq_length)]
         return []
 
     total_orfs = len(raw_hits)
@@ -285,6 +313,12 @@ def process_sequence(
 def _pool_worker(item, config):
     """Adapter so multiprocessing.Pool can call process_sequence."""
     source_file, seq_id, seq = item
+    if not seq:
+        # Surface malformed records to the user once per occurrence.
+        print(
+            f"Warning: empty sequence {seq_id!r} in {source_file}",
+            file=sys.stderr,
+        )
     try:
         return process_sequence(seq_id, seq, **config)
     except Exception as exc:
@@ -329,13 +363,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-m", "--min-length",
         type=int,
-        default=DEFAULT_MIN_LENGTH,
-        help=f"Minimum ORF length in base pairs (default: {DEFAULT_MIN_LENGTH}).",
+        default=None,
+        help=f"Minimum ORF length in base pairs "
+             f"(default: {DEFAULT_MIN_LENGTH}; ignored with --everything).",
     )
     parser.add_argument(
         "--longest-only",
         action="store_true",
         help="Report only the single longest ORF for each sequence.",
+    )
+    parser.add_argument(
+        "--everything",
+        action="store_true",
+        help="Report a row for every input sequence, including those with no "
+             "ORFs (zeros in the start/end/length/length_fraction/"
+             "total_orfs_in_sequence columns; empty strand and frame). "
+             "Disables --min-length filtering.",
     )
     parser.add_argument(
         "--start-codons",
@@ -412,17 +455,35 @@ def main() -> None:
     start_codons = validate_codons(args.start_codons, "start-codons")
     stop_codons = validate_codons(args.stop_codons, "stop-codons")
 
-    if args.min_length < 3:
-        raise SystemExit("Error: --min-length must be >= 3.")
+    # Resolve the effective minimum length, respecting --everything.
+    if args.everything:
+        if args.min_length is not None:
+            print(
+                "Warning: --min-length is ignored when --everything is set.",
+                file=sys.stderr,
+            )
+        effective_min_length = 0
+    else:
+        effective_min_length = (
+            args.min_length if args.min_length is not None else DEFAULT_MIN_LENGTH
+        )
+        if effective_min_length < 3:
+            raise SystemExit("Error: --min-length must be >= 3.")
+
     if args.threads is not None and args.threads < 1:
         raise SystemExit("Error: --threads must be >= 1.")
 
     print(f"Start codons:    {sorted(start_codons)}")
     print(f"Stop codons:     {sorted(stop_codons)}")
-    print(f"Min ORF length:  {args.min_length} bp")
+    if args.everything:
+        print("Min ORF length:  none (--everything)")
+    else:
+        print(f"Min ORF length:  {effective_min_length} bp")
     print(f"Strands:         {'forward only' if args.forward_only else 'both'}")
     if args.longest_only:
         print("Reporting only the longest ORF per sequence.")
+    if args.everything:
+        print("Reporting placeholder rows for sequences with no ORFs.")
     print("Maximal-ORF semantics: longest ORF per in-frame stop codon.")
 
     paths = collect_input_paths(args)
@@ -430,10 +491,11 @@ def main() -> None:
 
     config = {
         "forward_only": args.forward_only,
-        "min_length": args.min_length,
+        "min_length": effective_min_length,
         "start_codons": start_codons,
         "stop_codons": stop_codons,
         "longest_only": args.longest_only,
+        "report_no_orf": args.everything,
     }
 
     num_workers = args.threads if args.threads else (os.cpu_count() or 1)
