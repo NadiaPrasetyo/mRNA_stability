@@ -7,6 +7,8 @@ UTR_pair) from a GFF + genome FASTA pair, for a list of target gene IDs.
 Outputs (under $RUNS_ROOT/<dataset>/extracted_regions/):
   - extracted_<region>.fa     (multifasta per region)
   - manifest.tsv              (canonical metadata table — used by all downstream steps)
+  - canonical.gff             (filtered GFF, one transcript per gene; consumed by
+                               metric plugins under bin/01b_metrics.py)
   - extraction_summary.csv    (per-gene QC log)
   - run_manifest.yaml         (run-level reproducibility metadata)
   - utr_pair_geometry.tsv     (ONLY if UTR_pair is requested — per-record
@@ -77,6 +79,10 @@ def load_gene_ids(path):
 def is_extraction_current(out_dir, manifest_path, source_files, requested_regions):
     """Skip extraction if outputs exist and are newer than all source files."""
     if not os.path.exists(manifest_path):
+        return False
+    # canonical.gff is a downstream-shared artefact (consumed by metric plugins
+    # under bin/01b_metrics.py), so its presence is part of "extraction current".
+    if not os.path.exists(os.path.join(out_dir, "canonical.gff")):
         return False
     for region in requested_regions:
         if not os.path.exists(os.path.join(out_dir, f"extracted_{region}.fa")):
@@ -216,7 +222,7 @@ def write_filtered_gff(input_gff, output_gff, selected_transcripts):
             if match and normalise_gff_id(match.group(1)) in keep_tx_ids:
                 f_out.write(line)
                 written += 1
-    logging.info(f"Wrote {written} matching lines to temporary GFF.")
+    logging.info(f"Wrote {written} matching lines to canonical GFF.")
 
 
 def build_utr_pair_record(seq_5utr, seq_3utr, linker_char, linker_len):
@@ -537,16 +543,26 @@ def main():
         requested_genes, gene_to_tx, tx_data, priority_tags)
     logging.info(f"Found suitable transcripts for {len(selected)} genes.")
 
-    fd_gff, temp_gff = tempfile.mkstemp(suffix=".gff")
+    # canonical.gff is a kept artefact: filtered to one transcript per gene,
+    # consumed by metric plugins (bin/01b_metrics.py) and useful for
+    # reproducibility / quick inspection. Lives alongside the FASTAs in
+    # extracted_regions/.
+    canonical_gff = os.path.join(out_dir, "canonical.gff")
     fd_fa, temp_fa = tempfile.mkstemp(suffix=".fa")
-    os.close(fd_gff); os.close(fd_fa)
+    os.close(fd_fa)
+
+    # Invalidate any existing gffutils DB built off a previous canonical.gff;
+    # the metric plugin handles rebuild but we want it to detect staleness.
+    canonical_db = canonical_gff + ".db"
+    if os.path.exists(canonical_db):
+        os.remove(canonical_db)
 
     try:
-        write_filtered_gff(anno_gff, temp_gff, selected)
+        write_filtered_gff(anno_gff, canonical_gff, selected)
 
         logging.info("Running gffread to extract base mRNAs...")
         try:
-            subprocess.run(['gffread', '-w', temp_fa, '-g', genome_fa, temp_gff],
+            subprocess.run(['gffread', '-w', temp_fa, '-g', genome_fa, canonical_gff],
                            check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             logging.error(f"gffread failed:\n{e.stderr}")
@@ -560,9 +576,9 @@ def main():
         write_summary_log(logs, requested_genes, selected, processed_genes, out_dir)
 
     finally:
-        for p in (temp_gff, temp_fa):
-            if os.path.exists(p):
-                os.remove(p)
+        # canonical.gff is intentionally NOT deleted — it's a kept artefact.
+        if os.path.exists(temp_fa):
+            os.remove(temp_fa)
 
     write_run_manifest(out_dir, args.dataset, yaml_path, config,
                        requested_genes, priority_tags)

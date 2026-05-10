@@ -27,6 +27,124 @@ Each pipeline step takes `--dataset` and (where applicable) `--tool`. Outputs
 land under `runs/<dataset>/[<tool>/]` so multiple datasets and tools coexist
 without collision.
 
+
+```
+01_extract.py     -> runs/<dataset>/extracted_regions/{extracted_<region>.fa,
+                                                       manifest.tsv,
+                                                       canonical.gff}
+01b_metrics.py    -> runs/<dataset>/metrics/<metric>.tsv          (NEW)
+02_stratify.sh    -> runs/<dataset>/lists/{tier_<n>/, tier_<n>.txt, .lengths.tsv}
+03_calibrate.sh   -> runs/<dataset>/<tool>/calibration/<timestamp>/recommendations.tsv
+04_submit.sh      -> SLURM array per tier, calibrated resources
+05_collate.sh     -> runs/<dataset>/<tool>/combined.tsv
+```
+
+`canonical.gff` is now a kept artefact of `01_extract.py`: a filtered GFF
+containing one transcript per gene (the same transcripts whose sequences
+end up in the FASTAs). Metric plugins consume it directly.
+
+## Metrics
+
+Lightweight per-transcript features that don't need SLURM. Computed by
+`bin/01b_metrics.py`, which dispatches to plugin modules under `metrics/`.
+
+```bash
+./bin/01b_metrics.py -d my_dataset                # run all enabled metrics
+./bin/01b_metrics.py -d my_dataset -m junctions   # one metric only
+./bin/01b_metrics.py -d my_dataset --force        # recompute from scratch
+./bin/01b_metrics.py --list-plugins               # show discovered plugins
+```
+
+Outputs: `runs/<dataset>/metrics/<plugin>.tsv`, joinable to `manifest.tsv`
+on `transcript_id` and to other metrics on `gene_id` / `transcript_id`.
+
+### Configuring metrics
+
+In the dataset YAML, enable plugins under a `metrics:` block:
+
+```yaml
+species: human            # selects data/references/<species>/
+
+metrics:
+  junctions:
+    enabled: true
+  # codon_indices:
+  #   enabled: true       # (when added; needs references.csc_table etc.)
+
+# Optional: per-plugin reference tables. Plugin docstrings list the keys
+# they expect.
+references:
+  # csc_table: data/references/human/csc_presnyak2015.tsv
+  # cai_weights: data/references/human/cai_weights.tsv
+```
+
+### Adding a new metric
+
+Three things, mirroring the tools framework:
+
+**1. `metrics/<name>.py`** — the plugin module:
+
+```python
+"""metrics/foo.py — short description of what's measured."""
+from pathlib import Path
+from typing import Iterable
+
+OUTPUT_FILENAME = 'foo.tsv'
+
+
+def get_input_paths(paths, metric_config) -> Iterable[Path]:
+    """Files this metric reads (used for staleness checking)."""
+    return [paths.manifest_tsv,
+            paths.extract_dir / 'extracted_CDS.fa']
+
+
+def compute(paths, metric_config, output_path: Path) -> None:
+    """Read inputs, write output_path."""
+    ...
+```
+
+**2. `configs/datasets/<dataset>.yaml`** — enable it:
+
+```yaml
+metrics:
+  foo:
+    enabled: true
+```
+
+**3. (Optional) `data/references/<species>/<file>`** — if the metric needs
+species-specific tables, document the YAML keys it expects in its docstring,
+populate `references:` in the dataset YAML, and read them in `compute`.
+
+That's it. The orchestrator handles staleness checking, dispatch, error
+reporting, and idempotency.
+
+## `metrics/junctions.py`
+
+Exon-junction features per transcript. Output columns:
+
+| column | description |
+|---|---|
+| `transcript_id` | from `manifest.tsv` |
+| `gene_id` | |
+| `strand` | |
+| `n_exons` | |
+| `n_5UTR_junctions` | junctions falling within 5′UTR features |
+| `n_CDS_junctions` | junctions falling within CDS features |
+| `n_3UTR_junctions` | junctions falling within 3′UTR features |
+| `stop_dist_closest_upstream` | spliced nt; `NA` if none |
+| `stop_dist_closest_downstream` | spliced nt; `NA` if stop is in last exon |
+| `stop_dist_last_downstream` | spliced nt to *last* downstream junction (canonical NMD metric); `NA` if stop is in last exon |
+| `start_dist_closest_upstream` | spliced nt |
+| `start_dist_closest_downstream` | spliced nt |
+
+All distances are in **spliced (mature mRNA) coordinates**. NMD analyses
+typically threshold `stop_dist_last_downstream` at 50 nt — kept as a raw
+distance so threshold sweeps don't require recomputation.
+
+Region junction counts assume the GFF splits UTRs and CDS per-exon (MANE,
+GENCODE, modern Ensembl). Annotations that collapse a UTR into a single
+feature spanning introns will report 0 UTR junctions.
+
 ## Quick start
 
 ```bash

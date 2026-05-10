@@ -1,14 +1,29 @@
 # configs/datasets/example.yaml
-# A "dataset" = (genome, annotation, gene list, region selection).
+# A "dataset" = (genome, annotation, gene list, region selection,
+#                metric selection).
 # Copy this file to <dataset_name>.yaml; the filename (minus .yaml) is the
 # dataset identifier you pass with --dataset on the CLI.
 #
-# Outputs land at: $RUNS_ROOT/<dataset_name>/extracted_regions/
+# Outputs land at: $RUNS_ROOT/<dataset_name>/extracted_regions/   (01_extract)
+#                  $RUNS_ROOT/<dataset_name>/metrics/             (01b_metrics)
+
+# Species name resolves data/references/<species>/ for metric plugins that
+# need species-specific tables (CSC, CAI codon weights, tRNA copy numbers,
+# etc.). Optional; metrics that don't need references ignore it.
+species: human
 
 inputs:
-  genome_fasta: /path/to/genome.fa
-  annotation_gff: /path/to/annotation.gff3
-  gene_list: /path/to/gene_ids.txt
+  genome_fasta: data/human/GRCh38.primary_assembly.genome.fa
+  annotation_gff: data/human/MANE.GRCh38.v1.5.ensembl_genomic.gff
+  gene_list: data/human/gene_ids_human_test.txt
+
+# References block — paths to species-specific tables consumed by metric
+# plugins. Keys are plugin-defined; only filled in for plugins that need them.
+# Junctions does not need any references.
+references:
+  # csc_table: data/references/human/csc_presnyak2015.tsv     # for codon_indices
+  # cai_weights: data/references/human/cai_weights.tsv         # for codon_indices
+  # trna_copies: data/references/human/trna_gene_copies.tsv    # for codon_indices
 
 extraction:
   min_utr_length: 30                # records with shorter UTRs are flagged
@@ -43,3 +58,12 @@ extraction:
     linker_length: 7
     linker_char: N
     constraint_style: cross_pair    # forward-compat: only style supported now
+
+# Metrics — lightweight per-transcript features computed by bin/01b_metrics.py.
+# Each key is a plugin module name (metrics/<name>.py). Set 'enabled: true'
+# to include in a run; metrics with no entry here, or 'enabled: false', are
+# skipped. Per-plugin options live under each plugin's block.
+metrics:
+  junctions:
+    enabled: true
+    # No options — junctions reads canonical.gff and manifest.tsv only.
