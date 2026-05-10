@@ -71,15 +71,27 @@ def compute(paths, metric_config, output_path: Path) -> None:
     db = _open_or_build_db(gffutils, paths.canonical_gff,
                           paths.extract_dir / 'canonical.gff.db')
 
+    index = _build_transcript_index(db)
+    if not index:
+        log.error("No transcript-like features found in canonical.gff "
+                  "(no features with exon children). Cannot proceed.")
+        # Still write an empty TSV with header so the orchestrator's
+        # 'output produced' check passes; the warning above is the signal.
+        _write_tsv(output_path, [])
+        return
+
     transcript_ids = _read_manifest_transcripts(paths.manifest_tsv)
     log.info(f"Computing junctions for {len(transcript_ids)} transcripts")
 
     rows = []
     n_missing, n_no_exons = 0, 0
+    sample_missing = []
     for tx_id in transcript_ids:
-        tx_feature = _lookup_transcript(db, tx_id)
+        tx_feature = _lookup_transcript(db, tx_id, index)
         if tx_feature is None:
             n_missing += 1
+            if len(sample_missing) < 5:
+                sample_missing.append(tx_id)
             continue
         row = _compute_for_transcript(db, tx_feature, manifest_tx_id=tx_id)
         if row is None:
@@ -89,6 +101,16 @@ def compute(paths, metric_config, output_path: Path) -> None:
 
     if n_missing:
         log.warning(f"{n_missing} transcript(s) in manifest not found in canonical.gff")
+        # Diagnostic: when failure rate is high, dump samples so the user
+        # can compare manifest IDs vs the keys we actually indexed.
+        if n_missing >= max(5, len(transcript_ids) // 2):
+            sample_keys = [k for k in list(index.keys())[:8]]
+            log.warning("  ID format mismatch suspected. Examples:")
+            log.warning(f"    Manifest IDs (first 5): {sample_missing}")
+            log.warning(f"    GFF index keys (first 8): {sample_keys}")
+            log.warning("  Run with -v for the full feature-type list. "
+                        "If the formats clearly differ in a way the normaliser "
+                        "doesn't handle, file a bug or extend _KNOWN_PREFIXES.")
     if n_no_exons:
         log.warning(f"{n_no_exons} transcript(s) had no exon features")
 
@@ -138,38 +160,115 @@ def _open_or_build_db(gffutils, gff_path: Path, db_path: Path):
 # ---------------------------------------------------------------------------
 # Transcript ID lookup (manifest IDs vs GFF IDs are not always identical)
 # ---------------------------------------------------------------------------
+import re
+
+# Known namespace prefixes seen in GFF3 ID attributes:
+#   Ensembl/GENCODE: 'transcript:ENST...', 'gene:ENSG...'
+#   NCBI/RefSeq:     'rna-NM_...', 'gene-FOO' (also 'rna-XM_', 'rna-NR_', etc.)
+# Conservative list — only patterns that uniquely identify a namespace
+# prefix and won't false-strip anything that could appear inside a real ID.
+_KNOWN_PREFIXES = ('transcript:', 'gene:', 'rna-', 'gene-')
+
+# Trailing version suffix: '.<digits>' at end of string (e.g. ENST00000000001.7)
+_VERSION_RE = re.compile(r'\.\d+$')
+
+
+def _strip_prefix(s: str) -> str:
+    """Strip a known GFF3 ID namespace prefix; return s unchanged if none match."""
+    s_lower = s.lower()
+    for pfx in _KNOWN_PREFIXES:
+        if s_lower.startswith(pfx):
+            return s[len(pfx):]
+    return s
+
+
+def _strip_version(s: str) -> str:
+    """Strip a trailing '.<digits>' version suffix.
+    Only strips dot-then-pure-digits-to-end so e.g. 'ENST00000000001.7' -> 'ENST00000000001'
+    but 'gene.alpha' is preserved.
+    """
+    return _VERSION_RE.sub('', s)
+
 
 def _normalise_id(raw: str) -> str:
-    """Strip namespace prefix (e.g. 'transcript:') and dot version suffix."""
-    return raw.split(':')[-1].split('.')[0]
+    """Maximal normalisation: strip namespace prefix AND trailing version."""
+    return _strip_version(_strip_prefix(raw))
 
 
-def _lookup_transcript(db, manifest_tx_id: str):
-    """Try to find a transcript feature given an ID from the manifest.
+def _index_keys_for_feature(feat) -> list[str]:
+    """Generate every plausible lookup key for a transcript-like feature.
 
-    Manifests typically carry the versioned form (ENSTxxxxx.N) without the
-    'transcript:' prefix; canonical.gff line attributes may or may not match.
-    Try direct lookup first, then a normalised search.
+    Covers ID forms (raw, prefix-stripped, fully normalised), the
+    transcript_id attribute (same three forms), and a reconstructed
+    versioned form using a separate transcript_version / version attribute
+    if present (Ensembl convention where ID is unversioned but a separate
+    attribute carries the version).
     """
-    # Direct lookup
-    try:
-        return db[manifest_tx_id]
-    except Exception:
-        pass
+    keys = []
+    fid = feat.id
+    keys.extend([fid, _strip_prefix(fid), _normalise_id(fid)])
 
-    # Normalised lookup: scan transcript-like features and match by stripped form
-    target = _normalise_id(manifest_tx_id)
-    for feat_type in ('mRNA', 'transcript'):
+    for tid in feat.attributes.get('transcript_id', []):
+        keys.extend([tid, _strip_prefix(tid), _normalise_id(tid)])
+        # Reconstruct 'BARE.VERSION' if version stored separately
+        bare = _normalise_id(tid)
+        for vattr in ('transcript_version', 'version'):
+            for v in feat.attributes.get(vattr, []):
+                keys.append(f"{bare}.{v}")
+
+    # Deduplicate while preserving order; drop empties
+    seen = set()
+    out = []
+    for k in keys:
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _build_transcript_index(db) -> dict:
+    """Map every plausible ID form to the gffutils feature.id of its transcript.
+
+    Discovers transcripts as 'features that are Parents of exon features'.
+    This catches mRNA, transcript, primary_transcript, lnc_RNA, ncRNA, etc.
+    without needing to enumerate feature types up front.
+
+    First-write-wins on collisions: if two features share a normalised ID,
+    the first one indexed keeps the slot. Real annotations don't collide
+    here once the canonical.gff filter has trimmed to one transcript per gene.
+    """
+    parent_ids = set()
+    for exon in db.features_of_type('exon'):
+        for pid in exon.attributes.get('Parent', []):
+            parent_ids.add(pid)
+
+    index = {}
+    feat_types = set()
+    for pid in parent_ids:
         try:
-            for feat in db.features_of_type(feat_type):
-                # Check the feature ID and any transcript_id attribute
-                if _normalise_id(feat.id) == target:
-                    return feat
-                tid_attr = feat.attributes.get('transcript_id', [])
-                if tid_attr and _normalise_id(tid_attr[0]) == target:
-                    return feat
+            feat = db[pid]
         except Exception:
             continue
+        feat_types.add(feat.featuretype)
+        for key in _index_keys_for_feature(feat):
+            index.setdefault(key, feat.id)
+
+    log.debug(f"Indexed {len(parent_ids)} transcript-like features "
+              f"(types: {sorted(feat_types)}) under {len(index)} keys")
+    return index
+
+
+def _lookup_transcript(db, manifest_tx_id: str, index: dict):
+    """Look up a transcript by trying several forms of the manifest ID."""
+    for key in (manifest_tx_id,
+                _strip_prefix(manifest_tx_id),
+                _normalise_id(manifest_tx_id)):
+        feat_id = index.get(key)
+        if feat_id is not None:
+            try:
+                return db[feat_id]
+            except Exception:
+                pass
     return None
 
 
