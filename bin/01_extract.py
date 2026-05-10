@@ -213,13 +213,22 @@ def write_filtered_gff(input_gff, output_gff, selected_transcripts):
     logging.info("Writing filtered GFF...")
     keep_tx_ids = set(tx.stripped_id for tx in selected_transcripts.values())
 
+    # Capture all candidate IDs on each line — both 'transcript_id=' and
+    # 'Parent=' values. A transcript-level line carries 'Parent=<gene_id>'
+    # before 'transcript_id=<tx_id>'; an earlier single-match regex returned
+    # the leftmost match and dropped the line because the gene ID isn't in
+    # keep_tx_ids. Checking every candidate sidesteps the ordering issue
+    # and works for both GENCODE-style (transcript_id on every line) and
+    # vanilla Ensembl-style (Parent= as the only link on child features) GFFs.
+    pattern = re.compile(r'(?:transcript_id|Parent)=([^; \n]+)')
+
     written = 0
     with open(input_gff, 'r') as f_in, open(output_gff, 'w') as f_out:
         for line in f_in:
             if line.startswith("#"):
                 continue
-            match = re.search(r'(?:transcript_id=|Parent=)([^; \n]+)', line)
-            if match and normalise_gff_id(match.group(1)) in keep_tx_ids:
+            candidates = pattern.findall(line)
+            if any(normalise_gff_id(c) in keep_tx_ids for c in candidates):
                 f_out.write(line)
                 written += 1
     logging.info(f"Wrote {written} matching lines to canonical GFF.")
