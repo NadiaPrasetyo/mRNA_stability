@@ -236,6 +236,12 @@ def _iter_fasta(path: Path):
                 # Header: first whitespace-delimited token after '>'
                 header = line[1:].strip()
                 record_id = header.split(None, 1)[0] if header else ''
+                
+                # Patch: Extract transcript_id from <gene>_<transcript>_<region>
+                if record_id and record_id.count('_') >= 2:
+                    # Assuming format ENSG..._ENST..._REGION
+                    parts = record_id.split('_')
+                    record_id = parts[1]
                 chunks = []
             else:
                 # Strip whitespace (incl. newline); uppercase
