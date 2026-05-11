@@ -7,12 +7,19 @@ half-life analysis.
 ## Pipeline shape
 
 ```
-01_extract.py     -> runs/<dataset>/extracted_regions/{extracted_<region>.fa, manifest.tsv}
+01_extract.py     -> runs/<dataset>/extracted_regions/{extracted_<region>.fa,
+                                                       manifest.tsv,
+                                                       canonical.gff}
+01b_metrics.py    -> runs/<dataset>/metrics/<metric>.tsv
 02_stratify.sh    -> runs/<dataset>/lists/{tier_<n>/, tier_<n>.txt, .lengths.tsv}
 03_calibrate.sh   -> runs/<dataset>/<tool>/calibration/<timestamp>/recommendations.tsv
 04_submit.sh      -> SLURM array per tier, calibrated resources
 05_collate.sh     -> runs/<dataset>/<tool>/combined.tsv
 ```
+
+`canonical.gff` is a kept artefact of `01_extract.py`: a filtered GFF
+containing one transcript per gene (the same transcripts whose sequences end
+up in the FASTAs). Metric plugins consume it directly.
 
 Three independent axes:
 
@@ -27,22 +34,6 @@ Each pipeline step takes `--dataset` and (where applicable) `--tool`. Outputs
 land under `runs/<dataset>/[<tool>/]` so multiple datasets and tools coexist
 without collision.
 
-
-```
-01_extract.py     -> runs/<dataset>/extracted_regions/{extracted_<region>.fa,
-                                                       manifest.tsv,
-                                                       canonical.gff}
-01b_metrics.py    -> runs/<dataset>/metrics/<metric>.tsv          (NEW)
-02_stratify.sh    -> runs/<dataset>/lists/{tier_<n>/, tier_<n>.txt, .lengths.tsv}
-03_calibrate.sh   -> runs/<dataset>/<tool>/calibration/<timestamp>/recommendations.tsv
-04_submit.sh      -> SLURM array per tier, calibrated resources
-05_collate.sh     -> runs/<dataset>/<tool>/combined.tsv
-```
-
-`canonical.gff` is now a kept artefact of `01_extract.py`: a filtered GFF
-containing one transcript per gene (the same transcripts whose sequences
-end up in the FASTAs). Metric plugins consume it directly.
-
 ## Metrics
 
 Lightweight per-transcript features that don't need SLURM. Computed by
@@ -55,8 +46,18 @@ Lightweight per-transcript features that don't need SLURM. Computed by
 ./bin/01b_metrics.py --list-plugins               # show discovered plugins
 ```
 
-Outputs: `runs/<dataset>/metrics/<plugin>.tsv`, joinable to `manifest.tsv`
-on `transcript_id` and to other metrics on `gene_id` / `transcript_id`.
+Outputs land at `runs/<dataset>/metrics/<plugin>.tsv`, joinable to
+`manifest.tsv` on `transcript_id` and across metrics on `gene_id` /
+`transcript_id`. See `METRICS.md` for column-level documentation, gotchas,
+and join conventions for each plugin.
+
+Currently implemented:
+
+| plugin | output format | what it measures |
+|---|---|---|
+| `junctions` | wide | exon-junction counts per region; spliced distances from start / stop codons to nearest junctions |
+| `architecture` | wide | exon counts and length stats (first / last / internal mean / median / SD); intron length stats |
+| `sequence_basic` | long (one row per transcript per region) | length, base composition, GC content, GC / AT skew, purine and amino ratios |
 
 ### Configuring metrics
 
@@ -68,14 +69,21 @@ species: human            # selects data/references/<species>/
 metrics:
   junctions:
     enabled: true
-  # codon_indices:
-  #   enabled: true       # (when added; needs references.csc_table etc.)
+  architecture:
+    enabled: true
+  sequence_basic:
+    enabled: true
+    # Optional per-plugin config. See METRICS.md for the full list.
+    # regions: [mRNA, CDS, 5UTR, 3UTR]   # explicit override of auto-discovery
+    # skip_regions: [tail_region]        # additional skips beyond defaults
 
-# Optional: per-plugin reference tables. Plugin docstrings list the keys
-# they expect.
-references:
-  # csc_table: data/references/human/csc_presnyak2015.tsv
-  # cai_weights: data/references/human/cai_weights.tsv
+# Optional: shared registry of paths to species-specific reference tables.
+# Keys are plugin-defined; consult each plugin's docstring (or METRICS.md)
+# for the keys it expects. Paths resolve relative to project root unless
+# absolute. Plugins that require a missing key will fail loudly at run time.
+references: {}
+  # Example:
+  # some_table: data/references/human/some_table.tsv
 ```
 
 ### Adding a new metric
@@ -103,6 +111,10 @@ def compute(paths, metric_config, output_path: Path) -> None:
     ...
 ```
 
+If the plugin reads `canonical.gff`, import shared helpers from `lib.gff`
+(ID normalisation, gffutils DB open-or-build, transcript index, manifest
+reader). See `metrics/junctions.py` or `metrics/architecture.py` for usage.
+
 **2. `configs/datasets/<dataset>.yaml`** — enable it:
 
 ```yaml
@@ -118,33 +130,6 @@ populate `references:` in the dataset YAML, and read them in `compute`.
 That's it. The orchestrator handles staleness checking, dispatch, error
 reporting, and idempotency.
 
-## `metrics/junctions.py`
-
-Exon-junction features per transcript. Output columns:
-
-| column | description |
-|---|---|
-| `transcript_id` | from `manifest.tsv` |
-| `gene_id` | |
-| `strand` | |
-| `n_exons` | |
-| `n_5UTR_junctions` | junctions falling within 5′UTR features |
-| `n_CDS_junctions` | junctions falling within CDS features |
-| `n_3UTR_junctions` | junctions falling within 3′UTR features |
-| `stop_dist_closest_upstream` | spliced nt; `NA` if none |
-| `stop_dist_closest_downstream` | spliced nt; `NA` if stop is in last exon |
-| `stop_dist_last_downstream` | spliced nt to *last* downstream junction (canonical NMD metric); `NA` if stop is in last exon |
-| `start_dist_closest_upstream` | spliced nt |
-| `start_dist_closest_downstream` | spliced nt |
-
-All distances are in **spliced (mature mRNA) coordinates**. NMD analyses
-typically threshold `stop_dist_last_downstream` at 50 nt — kept as a raw
-distance so threshold sweeps don't require recomputation.
-
-Region junction counts assume the GFF splits UTRs and CDS per-exon (MANE,
-GENCODE, modern Ensembl). Annotations that collapse a UTR into a single
-feature spanning introns will report 0 UTR junctions.
-
 ## Quick start
 
 ```bash
@@ -153,24 +138,27 @@ feature spanning introns will report 0 UTR junctions.
 # 2. Extract regions
 ./bin/01_extract.py -d my_dataset
 
-# 3. Stratify by length (shared across tools)
+# 3. (Optional) Compute lightweight per-transcript metrics
+./bin/01b_metrics.py -d my_dataset
+
+# 4. Stratify by length (shared across tools)
 ./bin/02_stratify.sh -d my_dataset
 
-# 4. Calibrate (run on a compute node — fast now, MFE-only sampling for RNAfold)
+# 5. Calibrate (run on a compute node — fast now, MFE-only sampling for RNAfold)
 srun --pty -p aoraki --time=00:10:00 -c 1 --mem=4G bash -c \
     './bin/03_calibrate.sh -d my_dataset -t rnafold'
 
 # Optional: verify extrapolation accuracy on one full sample per tier
 ./bin/03_calibrate.sh -d my_dataset -t rnafold --verify
 
-# 5. Submit (uses calibration recommendations)
+# 6. Submit (uses calibration recommendations)
 ./bin/04_submit.sh -d my_dataset -t rnafold
 
-# 6. Resume any incomplete sequences
+# 7. Resume any incomplete sequences
 ./bin/find_missing.sh -d my_dataset -t rnafold > /tmp/redo.txt
 ./bin/04_submit.sh -d my_dataset -t rnafold --list /tmp/redo.txt
 
-# 7. Collate
+# 8. Collate
 ./bin/05_collate.sh -d my_dataset -t rnafold
 ```
 
@@ -189,16 +177,26 @@ configs/
     rnalfold.sh                  # (when added)
 
 lib/
-  paths.sh                       # shared arg parser + path resolver
+  paths.sh                       # shared arg parser + path resolver (bash side)
+  paths.py                       # PathContext + resolve_paths (Python side)
+  gff.py                         # shared GFF helpers for metric plugins
+                                 #   (ID normalisation, gffutils DB, transcript index)
 
 bin/
   01_extract.py                  # dataset-level
+  01b_metrics.py                 # dataset-level, plugin dispatcher
   02_stratify.sh                 # dataset-level
   03_calibrate.sh                # dataset + tool
   04_submit.sh                   # dataset + tool
   05_collate.sh                  # dataset + tool
   find_missing.sh                # dataset + tool
   migrate_legacy.sh              # one-off: pre-refactor -> new layout
+
+metrics/                         # plugin modules consumed by 01b_metrics.py
+  __init__.py                    # plugin contract documentation
+  junctions.py
+  architecture.py
+  sequence_basic.py
 
 tools/
   rnafold/
@@ -214,6 +212,7 @@ slurm/
 runs/                            # output, gitignored
   <dataset>/
     extracted_regions/           # shared across tools
+    metrics/                     # shared across tools
     lists/                       # shared across tools
     <tool>/
       results/  errors/  tmp/  slurm_logs/  raw_shuffles/
@@ -290,7 +289,7 @@ after binary upgrades or for new tools.
 | File | What lives there | When you edit it |
 |---|---|---|
 | `configs/cluster.sh` | partition, concurrency, tier bounds, safety factors | once per machine; rarely thereafter |
-| `configs/datasets/<name>.yaml` | genome, GFF, gene list, regions | once per dataset |
+| `configs/datasets/<name>.yaml` | genome, GFF, gene list, regions, metric selection, references | once per dataset |
 | `configs/tools/<name>.sh` | binary paths, tier policy, calib hooks | once per tool, plus when ViennaRNA etc. updates |
 
 ## Notes
