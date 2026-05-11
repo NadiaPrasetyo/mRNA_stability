@@ -208,3 +208,48 @@ def read_manifest_transcripts(manifest_tsv: Path) -> list[str]:
                 seen.add(tid)
                 ordered.append(tid)
     return ordered
+
+# ---------------------------------------------------------------------------
+# Fasta header parsing
+# ---------------------------------------------------------------------------
+
+def split_composite_fasta_id(
+    record_id: str,
+    region: str | None = None,
+) -> tuple[str, str, str] | None:
+    """Split a composite FASTA header into (gene_id, transcript_id, region).
+
+    01_extract.py writes FASTA headers in the form
+    '<gene_id>_<transcript_id>_<region>' (e.g.
+    'ENSG00000137075_ENST00000259605.11_CDS'). This helper extracts the
+    three components.
+
+    If `region` is provided, the function strips that exact suffix. This
+    is the recommended path for plugin code: each plugin knows which
+    region's FASTA it's reading, so passing it as a hint is robust to
+    multi-token region names (notably 'UTR_pair').
+
+    Without a region hint, falls back to assuming the region is the final
+    '_'-delimited token, with everything between the first '_' and the
+    final '_' as the transcript_id. This handles unknown regions but
+    misparses 'UTR_pair'-style names.
+
+    Returns None if the header doesn't conform to the composite pattern
+    (e.g. no underscores, or fewer than the expected parts).
+    """
+    if region is not None:
+        suffix = '_' + region
+        if not record_id.endswith(suffix):
+            return None
+        rest = record_id[:-len(suffix)]
+        if '_' not in rest:
+            return None
+        gene, _, transcript = rest.partition('_')
+        if not gene or not transcript:
+            return None
+        return gene, transcript, region
+
+    parts = record_id.split('_')
+    if len(parts) < 3:
+        return None
+    return parts[0], '_'.join(parts[1:-1]), parts[-1]
