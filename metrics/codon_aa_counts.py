@@ -72,8 +72,8 @@ _ALL_CODONS: tuple[str, ...] = tuple(sorted(_CODON_TABLE.keys()))  # 64, alpha
 
 def get_input_paths(paths, metric_config) -> Iterable[Path]:
     return [
-        paths.extracted_dir / "extracted_CDS.fa",
-        paths.extracted_dir / "manifest.tsv",
+        paths.extract_dir / "extracted_CDS.fa",
+        paths.extract_dir / "manifest.tsv",
     ]
 
 
@@ -93,7 +93,15 @@ def _iter_fasta(fa_path: Path):
             if line.startswith(">"):
                 if header is not None:
                     yield header, "".join(chunks)
-                header = line[1:].split(None, 1)[0]
+                # Header: first whitespace-delimited token after '>'
+                header = line[1:].strip()
+                record_id = header.split(None, 1)[0] if header else ''
+                
+                # Patch: Extract transcript_id from <gene>_<transcript>_<region>
+                if record_id and record_id.count('_') >= 2:
+                    # Assuming format ENSG..._ENST..._REGION
+                    parts = record_id.split('_')
+                    record_id = parts[1]
                 chunks = []
             else:
                 chunks.append(line)
