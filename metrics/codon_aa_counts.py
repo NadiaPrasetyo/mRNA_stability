@@ -173,8 +173,8 @@ def _format_row(transcript_id: str, counts: dict | None) -> list[str]:
 
 
 def compute(paths, metric_config, output_path: Path) -> None:
-    cds_fa = paths.extracted_dir / "extracted_CDS.fa"
-    manifest_tsv = paths.extracted_dir / "manifest.tsv"
+    cds_fa = paths.extract_dir / "extracted_CDS.fa"
+    manifest_tsv = paths.extract_dir / "manifest.tsv"
 
     transcript_order = read_manifest_transcripts(manifest_tsv)
 
