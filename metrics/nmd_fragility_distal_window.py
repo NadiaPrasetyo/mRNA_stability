@@ -1,0 +1,31 @@
+"""metrics/nmd_fragility_distal_window.py
+NMD fragility under the distal-window model.
+
+This model hypothesizes that the NMD machinery is most sensitive to
+premature stops located in a specific "proximal" window just prior to
+a terminal junction. 
+
+By default, it evaluates a 120nt window terminating 50nt upstream 
+of the absolute last exon-exon junction. Both the size of the window 
+and the anchor junction ('last' or 'penultimate') can be configured.
+
+If the available upstream CDS is shorter than the configured window, 
+it scans the available length and adjusts the density denominator 
+downward to reflect the true length scanned.
+"""
+import logging
+from pathlib import Path
+
+from metrics import _nmd_fragility_core as _core
+
+log = logging.getLogger('metrics.nmd_fragility_distal_window')
+
+OUTPUT_FILENAME = 'nmd_fragility_distal_window.tsv'
+
+
+def get_input_paths(paths, metric_config):
+    return _core.get_input_paths(paths, metric_config)
+
+
+def compute(paths, metric_config, output_path: Path) -> None:
+    _core.run(paths, metric_config, output_path, model='distal_window', log=log)
