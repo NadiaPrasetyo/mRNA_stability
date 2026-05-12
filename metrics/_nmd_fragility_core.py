@@ -17,7 +17,9 @@ from lib.gff import (
 )
 
 _NA = 'NA'
-_NMD_THRESHOLD = 50      # nt; strict (> 50, not >= 50)
+_NMD_THRESHOLD = 50      # nt; strict (> 50, not >= 50). Default for nearest/any
+                         # and the fallback default for distal_window's
+                         # configurable `nmd_threshold` key.
 _VALID_MODELS = ('nearest', 'any', 'distal_window')
 
 _HEADER = [
@@ -175,33 +177,48 @@ def _competent_zone_any(start_s: int, cds_len: int, junctions: list[int], metric
     return is_competent
 
 def _competent_zone_distal_window(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
+    """Mark positions inside a configurable window anchored to the last junction.
+
+    Config keys (all optional):
+        window_size    (int, default 120): length of the proximal scanning window in nt.
+        nmd_threshold  (int, default 50):  size of the NMD-immune safe zone in nt;
+                                           ignored when apply_nmd_rule is False.
+        apply_nmd_rule (bool, default True): if False, the window runs right up to
+                                             the junction (exclusive); the position
+                                             at the junction is still excluded.
+
+    If the available upstream CDS is shorter than the configured window, the
+    zone is clamped to the CDS boundary and `nmd_zone_length` reflects the
+    actual scanned length (so densities normalise correctly).
+    """
     is_competent = [False] * cds_len
-    if not junctions: return is_competent
+    if not junctions:
+        return is_competent
 
-    window_size = metric_config.get('window_size', 120)
-    anchor = metric_config.get('anchor', 'last') 
-    apply_nmd_rule = metric_config.get('apply_nmd_rule', True)
+    # Pull config with explicit type coercion (guards against YAML int-as-float etc.)
+    window_size    = int(metric_config.get('window_size', 120))
+    nmd_threshold  = int(metric_config.get('nmd_threshold', _NMD_THRESHOLD))
+    apply_nmd_rule = bool(metric_config.get('apply_nmd_rule', True))
 
-    # Select the target junction based on config
-    if anchor == 'penultimate' and len(junctions) >= 2:
-        target_j = junctions[-2]
-    else:
-        target_j = junctions[-1]
+    if window_size <= 0:
+        raise ValueError(f"window_size must be a positive int, got {window_size}")
+    if nmd_threshold < 0:
+        raise ValueError(f"nmd_threshold must be non-negative, got {nmd_threshold}")
 
-    # Map the window in global spliced coordinates
+    target_j = junctions[-1]
+
+    # Window end in spliced coordinates (exclusive upper bound).
     if apply_nmd_rule:
-        global_end = target_j - _NMD_THRESHOLD
+        global_end = target_j - nmd_threshold
     else:
-        # Boss mode: Window runs right up to the exact junction boundary
         global_end = target_j
 
     global_start = global_end - window_size
 
-    # Translate to 0-indexed CDS array coordinates, capping at CDS boundaries
-    cds_start = max(0, global_start - start_s)
-    cds_end = max(0, min(cds_len, global_end - start_s))
+    # Translate to 0-indexed CDS array coordinates with symmetric clamping.
+    cds_start = max(0, min(cds_len, global_start - start_s))
+    cds_end   = max(0, min(cds_len, global_end   - start_s))
 
-    # Mark the valid range
     for i in range(cds_start, cds_end):
         is_competent[i] = True
 

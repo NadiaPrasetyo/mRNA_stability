@@ -1,16 +1,23 @@
 """metrics/nmd_fragility_distal_window.py
 NMD fragility under the distal-window model.
 
-This model hypothesizes that the NMD machinery is most sensitive to
-premature stops located in a specific "proximal" window just prior to
-a terminal junction. 
+This model hypothesises that the NMD machinery is most sensitive to
+premature stops located in a specific "proximal" window just prior
+to the last exon-exon junction.
 
-By default, it evaluates a 120nt window terminating 50nt upstream 
-of the absolute last exon-exon junction. Both the size of the window 
-and the anchor junction ('last' or 'penultimate') can be configured.
+By default, it evaluates a 120-nt window terminating 50 nt upstream
+of the last exon-exon junction. Three parameters are configurable
+via the dataset YAML:
 
-If the available upstream CDS is shorter than the configured window, 
-it scans the available length and adjusts the density denominator 
+  - window_size    (default 120): length of the scanning window in nt.
+  - nmd_threshold  (default 50):  size of the NMD-immune safe zone;
+                                  literature gives 50-55 nt.
+  - apply_nmd_rule (default True): if False, the window runs right
+                                   up to (but not including) the
+                                   junction, ignoring the safe zone.
+
+If the available upstream CDS is shorter than the configured window,
+it scans the available length and adjusts the density denominator
 downward to reflect the true length scanned.
 """
 import logging
