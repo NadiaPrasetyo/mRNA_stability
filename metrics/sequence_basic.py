@@ -51,7 +51,7 @@ import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
-from lib.gff import normalise_id, strip_prefix
+from lib.gff import normalise_id, strip_prefix, split_composite_fasta_id
 
 log = logging.getLogger('metrics.sequence_basic')
 
@@ -107,7 +107,7 @@ def compute(paths, metric_config, output_path: Path) -> None:
         sample_unmatched: list[str] = []
         for record_id, sequence in _iter_fasta(fa_path):
             n_records += 1
-            tx_row = _lookup_manifest(record_id, manifest_index)
+            tx_row = _lookup_manifest(record_id, manifest_index, region=region)
             if tx_row is None:
                 n_unmatched += 1
                 if len(sample_unmatched) < 5:
@@ -170,20 +170,25 @@ def _discover_region_files(paths, metric_config) -> dict[str, Path]:
 # ---------------------------------------------------------------------------
 
 def _read_manifest(manifest_tsv: Path) -> list[dict]:
-    """Return list of {transcript_id, gene_id} dicts, one per manifest row.
+    """Read manifest.tsv and return one row per transcript.
 
-    gene_id is normalised at read time; transcript_id is preserved verbatim.
-    Missing gene_id column → empty string; missing values → empty string.
+    The manifest is long-format with one row per (transcript, region).
+    We filter to region == 'mRNA' to obtain the canonical
+    transcript-level entry; every annotated transcript has an mRNA row.
     """
     out = []
     with open(manifest_tsv, 'r', newline='') as f:
         reader = csv.DictReader(f, delimiter='\t')
-        if 'transcript_id' not in (reader.fieldnames or []):
-            raise ValueError(
-                f"manifest.tsv has no 'transcript_id' column; "
-                f"got {reader.fieldnames}")
-        has_gene = 'gene_id' in (reader.fieldnames or [])
+        fields = reader.fieldnames or []
+        for required in ('transcript_id', 'region'):
+            if required not in fields:
+                raise ValueError(
+                    f"manifest.tsv missing required column {required!r}; "
+                    f"got {fields}")
+        has_gene = 'gene_id' in fields
         for row in reader:
+            if row.get('region') != 'mRNA':
+                continue
             tid = row.get('transcript_id') or ''
             if not tid:
                 continue
@@ -220,12 +225,7 @@ def _lookup_manifest(record_id: str, index: dict[str, dict]) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 def _iter_fasta(path: Path):
-    """Yield (record_id, sequence_uppercase) for each record.
-
-    record_id = first whitespace-delimited token of the header line.
-    Sequences are uppercased and stripped of whitespace. Multi-line
-    sequences are concatenated.
-    """
+    """Yield (record_id, sequence_uppercase) for each record."""
     record_id: Optional[str] = None
     chunks: list[str] = []
     with open(path, 'r') as f:
@@ -233,21 +233,26 @@ def _iter_fasta(path: Path):
             if line.startswith('>'):
                 if record_id is not None:
                     yield record_id, ''.join(chunks)
-                # Header: first whitespace-delimited token after '>'
                 header = line[1:].strip()
                 record_id = header.split(None, 1)[0] if header else ''
-                
-                # Patch: Extract transcript_id from <gene>_<transcript>_<region>
-                if record_id and record_id.count('_') >= 2:
-                    # Assuming format ENSG..._ENST..._REGION
-                    parts = record_id.split('_')
-                    record_id = parts[1]
                 chunks = []
             else:
-                # Strip whitespace (incl. newline); uppercase
                 chunks.append(line.strip().upper())
     if record_id is not None:
         yield record_id, ''.join(chunks)
+
+
+def _lookup_manifest(record_id: str, index: dict[str, dict],
+                     region: str) -> Optional[dict]:
+    parsed = split_composite_fasta_id(record_id, region=region)
+    candidates: list[str] = []
+    if parsed is not None:
+        candidates.append(parsed[1])
+    candidates.extend((record_id, strip_prefix(record_id), normalise_id(record_id)))
+    for key in candidates:
+        if key in index:
+            return index[key]
+    return None
 
 
 # ---------------------------------------------------------------------------

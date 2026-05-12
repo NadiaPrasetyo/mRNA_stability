@@ -193,7 +193,7 @@ Density of NMD tripwires in the NMD-competent zones of the CDS:
 out-of-frame stop codons (potential ambush stops if a frameshift
 occurs upstream) and in-frame codons one transition away from a
 stop codon (potential premature stops if a nonsense mutation
-occurs). 
+occurs).
 
 Three output files, one per NMD model — identical columns,
 identical inputs, different definitions of "competent". Wide format.
@@ -211,8 +211,10 @@ identical inputs, different definitions of "competent". Wide format.
 | `alt_stop_density` | `n_alt_stops / nmd_zone_length`; `NA` if `nmd_zone_length == 0` |
 | `fragile_codon_density` | `n_fragile_codons / nmd_zone_length`; `NA` if `nmd_zone_length == 0` |
 
-**The three models.** All threshold downstream-junction distance at
-50 nt by default; they differ in *which* junction matters.
+**The three models.** The `nearest` and `any` models threshold the
+downstream-junction distance at 50 nt; they differ in *which* junction
+matters. The `distal_window` model uses a configurable threshold
+(default 50 nt) and restricts scanning to a configurable window.
 
 - *Nearest-EJC* (`nmd_fragility_nearest.tsv`): position `p` is
   competent iff the next downstream junction is more than 50 nt
@@ -230,26 +232,27 @@ identical inputs, different definitions of "competent". Wide format.
   more distal junctions remain and can fire NMD. Matches the
   semantics of `junctions.tsv`'s `stop_dist_last_downstream > 50`.
 
-- *Distal-Window* (`nmd_fragility_distal_window.tsv`): Evaluates a 
-  configurable window (default 120 nt) anchored to either the `last` 
-  or `penultimate` exon-exon junction. A configuration toggle 
-  (`apply_nmd_rule`) determines whether the window respects the 50-nt 
-  NMD-immune safe zone or runs right up to the junction. If the 
-  available upstream CDS is shorter than the window, it scans the 
-  available sequence and adjusts the denominator accordingly.
+- *Distal-Window* (`nmd_fragility_distal_window.tsv`): evaluates a
+  configurable window (default 120 nt) anchored to the last exon-exon
+  junction. A configurable threshold (default 50 nt, literature 50-55)
+  sets the size of the NMD-immune safe zone, and a boolean toggle
+  (`apply_nmd_rule`) determines whether the window respects the
+  safe zone or runs right up to the junction. If the available
+  upstream CDS is shorter than the window, it scans the available
+  sequence and adjusts the denominator accordingly.
 
 **Optional config for the distal window:**
 
     metrics:
       nmd_fragility_distal_window:
         enabled: true
-        window_size: 120          # length of the proximal scanning window
-        anchor: 'last'            # anchor junction ('last' or 'penultimate')
-        apply_nmd_rule: true      # set to false to ignore the 50nt safe zone
+        window_size: 120          # length of the proximal scanning window (nt)
+        nmd_threshold: 50         # NMD-immune safe zone (nt); literature: 50-55
+        apply_nmd_rule: true      # set to false to ignore the safe zone
 
-The nearest and any models diverge on positions in the last 50 nt of internal exons:
-nearest excludes them, any includes them. Worked example for a
-5-exon CDS with exons of 200 nt each (junctions at spliced 200,
+The nearest and any models diverge on positions in the last 50 nt of
+internal exons: nearest excludes them, any includes them. Worked example
+for a 5-exon CDS with exons of 200 nt each (junctions at spliced 200,
 400, 600, 800; CDS length 1000):
 
 - Nearest zone: `[0,150) ∪ [200,350) ∪ [400,550) ∪ [600,750)` = 600 nt
@@ -286,8 +289,9 @@ preserves them with `NA` rows.
 - Boundary convention: a junction at exactly position `p` is treated
   as upstream (distance 0), matching `junctions.py`. A junction at
   `p + 1` is downstream with distance 1.
-- The 50nt threshold is strict (`>`, not `>=`): a junction exactly
-  50 nt downstream of `p` does NOT make `p` competent; 51 nt does.
+- The threshold is strict (`>`, not `>=`): for the default 50 nt
+  threshold, a junction exactly 50 nt downstream of `p` does NOT
+  make `p` competent; 51 nt does.
 
 ---
 

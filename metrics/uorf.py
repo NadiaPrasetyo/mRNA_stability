@@ -183,15 +183,25 @@ def _resolve_start_codons(metric_config) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 def _read_manifest(manifest_tsv: Path) -> list[dict]:
+    """Read manifest.tsv and return one row per transcript.
+
+    The manifest is long-format with one row per (transcript, region).
+    We filter to region == 'mRNA' to obtain the canonical
+    transcript-level entry; every annotated transcript has an mRNA row.
+    """
     out = []
     with open(manifest_tsv, 'r', newline='') as f:
         reader = csv.DictReader(f, delimiter='\t')
-        if 'transcript_id' not in (reader.fieldnames or []):
-            raise ValueError(
-                f"manifest.tsv has no 'transcript_id' column; "
-                f"got {reader.fieldnames}")
-        has_gene = 'gene_id' in (reader.fieldnames or [])
+        fields = reader.fieldnames or []
+        for required in ('transcript_id', 'region'):
+            if required not in fields:
+                raise ValueError(
+                    f"manifest.tsv missing required column {required!r}; "
+                    f"got {fields}")
+        has_gene = 'gene_id' in fields
         for row in reader:
+            if row.get('region') != 'mRNA':
+                continue
             tid = row.get('transcript_id') or ''
             if not tid:
                 continue
