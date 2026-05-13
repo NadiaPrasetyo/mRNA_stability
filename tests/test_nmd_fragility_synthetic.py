@@ -48,9 +48,24 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 # --- Fixtures ---------------------------------------------------------------
 
-@pytest.fixture
-def synthetic_paths(tmp_path):
+# GFF source file per strand. The FASTA, manifest, and expected outputs
+# are identical between strands by construction — see fixtures/README in
+# the fixtures dir, and the verification in fixtures/_generate_and_verify.py
+# that confirms both GFFs parse to the same spliced layout.
+_GFF_BY_STRAND = {
+    "plus":  "synthetic_5x200.gff3",
+    "minus": "synthetic_5x200_minus.gff3",
+}
+
+
+@pytest.fixture(params=["plus", "minus"])
+def synthetic_paths(request, tmp_path):
     """Copy synthetic fixtures into tmp_path and return a paths-like namespace.
+
+    Parametrised over both strand fixtures. The minus-strand twin exercises
+    the strand-specific branches in `_build_spliced_index`,
+    `_genomic_to_spliced`, and `_start_codon_genomic_pos`; expected outputs
+    are identical to the plus-strand case (same spliced layout, same FASTA).
 
     Mirrors the directory layout the real pipeline gives the plugin:
     `paths.canonical_gff`, `paths.manifest_tsv`, `paths.extract_dir`
@@ -59,15 +74,20 @@ def synthetic_paths(tmp_path):
     extract_dir = tmp_path / "extract"
     extract_dir.mkdir()
 
-    shutil.copy(FIXTURE_DIR / "synthetic_5x200.gff3",     extract_dir / "canonical.gff")
+    gff_src = FIXTURE_DIR / _GFF_BY_STRAND[request.param]
+    shutil.copy(gff_src,                                  extract_dir / "canonical.gff")
     shutil.copy(FIXTURE_DIR / "synthetic_5x200_CDS.fa",   extract_dir / "extracted_CDS.fa")
     shutil.copy(FIXTURE_DIR / "manifest.tsv",             tmp_path / "manifest.tsv")
 
-    return SimpleNamespace(
+    paths = SimpleNamespace(
         canonical_gff=extract_dir / "canonical.gff",
         manifest_tsv=tmp_path / "manifest.tsv",
         extract_dir=extract_dir,
     )
+    # Stash the strand label on the namespace so individual tests can
+    # include it in failure messages without changing their signature.
+    paths.strand = request.param
+    return paths
 
 
 @pytest.fixture
@@ -107,7 +127,7 @@ def test_zone_length(synthetic_paths, tmp_path, log, model, expected_zone_length
     row = _read_single_row(output)
     actual = int(row["nmd_zone_length"])
     assert actual == expected_zone_length, (
-        f"{model}: nmd_zone_length mismatch. "
+        f"[{synthetic_paths.strand} strand] {model}: nmd_zone_length mismatch. "
         f"Expected {expected_zone_length} (per METRICS.md's 5x200 example), got {actual}."
     )
 
@@ -137,12 +157,14 @@ def test_feature_counts(
     actual_alt_stops = int(row["n_alt_stops"])
 
     assert actual_fragile == expected_fragile, (
-        f"{model}: n_fragile_codons mismatch. Expected {expected_fragile}, got {actual_fragile}. "
+        f"[{synthetic_paths.strand} strand] {model}: n_fragile_codons mismatch. "
+        f"Expected {expected_fragile}, got {actual_fragile}. "
         f"This suggests a bug in in-frame codon iteration or the competent-zone boundary "
         f"for this model."
     )
     assert actual_alt_stops == expected_alt_stops, (
-        f"{model}: n_alt_stops mismatch. Expected {expected_alt_stops}, got {actual_alt_stops}. "
+        f"[{synthetic_paths.strand} strand] {model}: n_alt_stops mismatch. "
+        f"Expected {expected_alt_stops}, got {actual_alt_stops}. "
         f"This suggests a bug in out-of-frame scanning or codon-set membership."
     )
 
@@ -172,9 +194,10 @@ def test_distal_window_apply_nmd_rule_false(synthetic_paths, tmp_path, log):
         log=log,
     )
     row = _read_single_row(output)
-    assert int(row["nmd_zone_length"])  == 120
-    assert int(row["n_fragile_codons"]) == 3
-    assert int(row["n_alt_stops"])      == 0
+    s = synthetic_paths.strand
+    assert int(row["nmd_zone_length"])  == 120, f"[{s}] zone length should be invariant under the toggle"
+    assert int(row["n_fragile_codons"]) == 3,   f"[{s}] expected 3 fragile codons in rule-off window"
+    assert int(row["n_alt_stops"])      == 0,   f"[{s}] expected 0 alt-stops in rule-off window"
 
 
 # --- Smoke test: fixture is well-formed -------------------------------------
@@ -183,9 +206,13 @@ def test_fixture_well_formed(synthetic_paths):
     """Cheap sanity check that the fixture files exist and look right.
 
     Catches accidental deletion / corruption of fixture files before
-    the test reports a confusing plugin-side failure.
+    the test reports a confusing plugin-side failure. Runs once per
+    strand parametrisation, so verifies both GFFs.
     """
     # FASTA: composite header, 999 nt of sequence, starts ATG, ends TAA.
+    # Same FASTA is reused across both strand fixtures by design (the
+    # FASTA represents the *transcribed* sequence, which is identical
+    # between the two strand cases).
     fa = (synthetic_paths.extract_dir / "extracted_CDS.fa").read_text().splitlines()
     assert fa[0] == ">GENE001_TX001_CDS", f"Unexpected FASTA header: {fa[0]!r}"
     seq = "".join(line.strip() for line in fa[1:])
@@ -193,7 +220,7 @@ def test_fixture_well_formed(synthetic_paths):
     assert seq[:3] == "ATG", f"CDS should start ATG, starts with {seq[:3]!r}"
     assert seq[-3:] == "TAA", f"CDS should end TAA, ends with {seq[-3:]!r}"
 
-    # GFF: parseable, has all the expected feature types.
+    # GFF: parseable, has all the expected feature types and the right strand.
     import gffutils
     db = gffutils.create_db(
         str(synthetic_paths.canonical_gff), ":memory:",
@@ -204,3 +231,11 @@ def test_fixture_well_formed(synthetic_paths):
     assert len(list(db.features_of_type("exon")))        == 5
     assert len(list(db.features_of_type("CDS")))         == 5
     assert len(list(db.features_of_type("start_codon"))) == 1
+    assert len(list(db.features_of_type("stop_codon")))  == 1
+
+    expected_strand = "+" if synthetic_paths.strand == "plus" else "-"
+    tx = db["transcript:TX001"]
+    assert tx.strand == expected_strand, (
+        f"Fixture strand mismatch: parametrised as {synthetic_paths.strand!r}, "
+        f"but GFF says strand={tx.strand!r}"
+    )

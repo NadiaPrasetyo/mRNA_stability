@@ -23,9 +23,16 @@ Or, for a quick non-pytest sanity check with diff output:
       test_nmd_fragility_synthetic.py      # the three-model sanity check
       fixtures/
         _generate_and_verify.py            # generates the CDS FASTA + self-checks
-        synthetic_5x200.gff3               # 5-exon × 200-nt transcript
-        synthetic_5x200_CDS.fa             # 999-nt CDS with targeted inserts
+        synthetic_5x200.gff3               # 5-exon × 200-nt transcript, + strand
+        synthetic_5x200_minus.gff3         # same geometry, - strand twin
+        synthetic_5x200_CDS.fa             # 999-nt CDS with targeted inserts (shared)
         manifest.tsv                       # minimal manifest for the synthetic transcript
+
+The minus-strand GFF has identical genomic exon spans to the plus-strand
+one, but `strand=-` and recomputed CDS phases. The FASTA represents the
+transcribed sequence and is shared. Both GFFs parse to the same spliced
+layout (junctions at 200/400/600/800, start_s=0); the
+`_generate_and_verify.py` script confirms this.
 
 ## Why three assertion layers?
 
@@ -42,6 +49,14 @@ each of three layers exposes a different fault class:
 
 Each model produces a different expected value at every layer. A
 discrepancy localises the bug to one model and one layer.
+
+Every test is also parametrised over `strand ∈ {plus, minus}`, which
+adds a fourth orthogonal axis: the strand-specific branches in
+`_build_spliced_index`, `_genomic_to_spliced`, and
+`_start_codon_genomic_pos`. Expected counts are identical between
+strands by construction, so any divergence is a strand-handling bug.
+Failure messages prefix the strand label (`[plus strand] ...` /
+`[minus strand] ...`) for unambiguous diagnosis.
 
 ## Adding a new fixture
 

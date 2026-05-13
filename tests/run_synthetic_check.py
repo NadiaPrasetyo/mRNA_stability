@@ -30,6 +30,13 @@ from metrics._nmd_fragility_core import run as run_core  # noqa: E402
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
+# Strand → GFF filename. The FASTA, manifest, and expected outputs are
+# identical between strands by design.
+GFF_BY_STRAND = {
+    "plus":  "synthetic_5x200.gff3",
+    "minus": "synthetic_5x200_minus.gff3",
+}
+
 # (model, metric_config, expected_dict)
 CASES = [
     ("nearest",       {},                            {"nmd_zone_length": 600, "n_fragile_codons": 4, "n_alt_stops": 2}),
@@ -39,12 +46,12 @@ CASES = [
 ]
 
 
-def stage_fixtures(workdir: Path) -> SimpleNamespace:
+def stage_fixtures(workdir: Path, strand: str) -> SimpleNamespace:
     extract = workdir / "extract"
     extract.mkdir(parents=True, exist_ok=True)
-    shutil.copy(FIXTURE_DIR / "synthetic_5x200.gff3",     extract / "canonical.gff")
-    shutil.copy(FIXTURE_DIR / "synthetic_5x200_CDS.fa",   extract / "extracted_CDS.fa")
-    shutil.copy(FIXTURE_DIR / "manifest.tsv",             workdir / "manifest.tsv")
+    shutil.copy(FIXTURE_DIR / GFF_BY_STRAND[strand],     extract / "canonical.gff")
+    shutil.copy(FIXTURE_DIR / "synthetic_5x200_CDS.fa",  extract / "extracted_CDS.fa")
+    shutil.copy(FIXTURE_DIR / "manifest.tsv",            workdir / "manifest.tsv")
     return SimpleNamespace(
         canonical_gff=extract / "canonical.gff",
         manifest_tsv=workdir / "manifest.tsv",
@@ -91,33 +98,39 @@ def main() -> int:
         workdir = Path(cleanup.name)
 
     try:
-        paths = stage_fixtures(workdir)
-
         failures: list[str] = []
-        for model, cfg, expected in CASES:
-            label = f"{model}" + (f" [{cfg}]" if cfg else "")
-            output_name = model + ("_rule_off" if cfg.get("apply_nmd_rule") is False else "") + ".tsv"
-            output_path = workdir / output_name
+        n_total = 0
+        for strand in ("plus", "minus"):
+            print(f"\n--- {strand.upper()} STRAND ---")
+            strand_workdir = workdir / strand
+            strand_workdir.mkdir(parents=True, exist_ok=True)
+            paths = stage_fixtures(strand_workdir, strand)
 
-            row = run_one(paths, model, cfg, output_path, log)
-            actual = {k: int(row[k]) for k in expected}
+            for model, cfg, expected in CASES:
+                n_total += 1
+                label = f"{model}" + (f" [{cfg}]" if cfg else "")
+                output_name = model + ("_rule_off" if cfg.get("apply_nmd_rule") is False else "") + ".tsv"
+                output_path = strand_workdir / output_name
 
-            ok = actual == expected
-            marker = "OK  " if ok else "FAIL"
-            print(f"  [{marker}] {label:40s}")
-            print(f"           expected={expected}")
-            print(f"           actual  ={actual}")
-            if not ok:
-                diffs = [f"{k}: {expected[k]} vs {actual[k]}" for k in expected if expected[k] != actual[k]]
-                failures.append(f"{label} — " + ", ".join(diffs))
+                row = run_one(paths, model, cfg, output_path, log)
+                actual = {k: int(row[k]) for k in expected}
+
+                ok = actual == expected
+                marker = "OK  " if ok else "FAIL"
+                print(f"  [{marker}] {label:40s}")
+                print(f"           expected={expected}")
+                print(f"           actual  ={actual}")
+                if not ok:
+                    diffs = [f"{k}: {expected[k]} vs {actual[k]}" for k in expected if expected[k] != actual[k]]
+                    failures.append(f"[{strand}] {label} — " + ", ".join(diffs))
 
         print()
         if failures:
-            print(f"{len(failures)} of {len(CASES)} case(s) FAILED:")
+            print(f"{len(failures)} of {n_total} case(s) FAILED:")
             for f in failures:
                 print(f"  - {f}")
             return 1
-        print(f"All {len(CASES)} cases passed.")
+        print(f"All {n_total} cases passed (across both strands).")
         return 0
     finally:
         if cleanup is not None:

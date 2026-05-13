@@ -223,7 +223,59 @@ def main() -> int:
     if failures:
         print(f"\n{len(failures)} prediction(s) FAILED. Fixture and test file are out of sync.")
         return 1
-    print("\nAll predictions match. Fixture is consistent with test expectations.")
+
+    # --- GFF cross-strand check -----------------------------------------
+    # Verify that both strand fixtures parse to the same spliced layout.
+    # This catches phase / coordinate errors in the hand-written GFFs
+    # before they confuse a plugin-level failure.
+    print("\nGFF strand-twin check (requires gffutils):")
+    try:
+        import gffutils
+    except ImportError:
+        print("  [SKIP] gffutils not installed; can't verify GFFs")
+        return 0
+
+    def parse_layout(gff_path: Path):
+        db = gffutils.create_db(str(gff_path), ":memory:", force=True,
+                                keep_order=True, merge_strategy="merge")
+        tx = db["transcript:TX001"]
+        exons = list(db.children(tx, featuretype="exon"))
+        if tx.strand == "-":
+            sorted_e = sorted(exons, key=lambda e: e.start, reverse=True)
+        else:
+            sorted_e = sorted(exons, key=lambda e: e.start)
+        cum = 0
+        junctions: list[int] = []
+        for e in sorted_e[:-1]:
+            cum += (e.end - e.start + 1)
+            junctions.append(cum)
+        starts = list(db.children(tx, featuretype="start_codon"))
+        start_g = (max(s.end for s in starts) if tx.strand == "-"
+                   else min(s.start for s in starts))
+        # Map start_g to spliced
+        spliced_start = 0
+        for e in sorted_e:
+            if e.start <= start_g <= e.end:
+                offset = (e.end - start_g) if tx.strand == "-" else (start_g - e.start)
+                start_s = spliced_start + offset
+                break
+            spliced_start += (e.end - e.start + 1)
+        return tx.strand, junctions, start_s
+
+    here = Path(__file__).parent
+    plus  = parse_layout(here / "synthetic_5x200.gff3")
+    minus = parse_layout(here / "synthetic_5x200_minus.gff3")
+    print(f"  plus  strand: junctions={plus[1]}, start_s={plus[2]}")
+    print(f"  minus strand: junctions={minus[1]}, start_s={minus[2]}")
+    if plus[1:] != minus[1:]:
+        print("  [FAIL] Strand twins produce different spliced layouts.")
+        return 1
+    if plus[1] != [200, 400, 600, 800] or plus[2] != 0:
+        print(f"  [FAIL] Plus-strand layout doesn't match documented 5x200 geometry.")
+        return 1
+    print("  [OK  ] Both strands produce junctions=[200,400,600,800], start_s=0.")
+
+    print("\nAll predictions match. Fixtures are consistent with test expectations.")
     return 0
 
 
