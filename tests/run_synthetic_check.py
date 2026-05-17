@@ -39,10 +39,10 @@ GFF_BY_STRAND = {
 
 # (model, metric_config, expected_dict)
 CASES = [
-    ("nearest",       {},                            {"nmd_zone_length": 600, "n_fragile_codons": 4, "n_alt_stops": 2}),
-    ("any",           {},                            {"nmd_zone_length": 750, "n_fragile_codons": 5, "n_alt_stops": 2}),
-    ("distal_window", {},                            {"nmd_zone_length": 120, "n_fragile_codons": 3, "n_alt_stops": 1}),
-    ("distal_window", {"apply_nmd_rule": False},     {"nmd_zone_length": 120, "n_fragile_codons": 3, "n_alt_stops": 0}),
+    ("nearest",       {},                            {"zone_length": 600, "n_fragile_codons": 4, "n_alt_stops": 2}),
+    ("any",           {},                            {"zone_length": 750, "n_fragile_codons": 5, "n_alt_stops": 2}),
+    ("distal_window", {},                            {"zone_length": 120, "n_fragile_codons": 3, "n_alt_stops": 1}),
+    ("distal_window", {"apply_nmd_rule": False},     {"zone_length": 120, "n_fragile_codons": 3, "n_alt_stops": 0}),
 ]
 
 

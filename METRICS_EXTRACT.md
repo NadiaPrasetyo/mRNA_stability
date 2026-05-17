@@ -65,13 +65,13 @@ identical inputs, different definitions of "competent". Wide format.
 | `transcript_id` | from `manifest.tsv`, preserved verbatim |
 | `gene_id` | normalised |
 | `strand` | `+` or `-` |
-| `nmd_model` | `nearest`, `any`, or `distal_window`; records which variant produced this row |
+| `model` | `nearest`, `any`, or `distal_window`; records which variant produced this row |
 | `cds_length` | total extracted CDS length (nt) |
-| `nmd_zone_length` | total length of NMD-competent CDS positions (nt) |
+| `zone_length` | total length of NMD-competent CDS positions (nt) |
 | `n_alt_stops` | count of out-of-frame TAA/TAG/TGA codons starting within the NMD-competent zone |
 | `n_fragile_codons` | count of in-frame CGA/CAG/CAA/TGG codons starting within the NMD-competent zone |
-| `alt_stop_density` | `n_alt_stops / nmd_zone_length`; `NA` if `nmd_zone_length == 0` |
-| `fragile_codon_density` | `n_fragile_codons / nmd_zone_length`; `NA` if `nmd_zone_length == 0` |
+| `alt_stop_density` | `n_alt_stops / zone_length`; `NA` if `zone_length == 0` |
+| `fragile_codon_density` | `n_fragile_codons / zone_length`; `NA` if `zone_length == 0` |
 
 **The three models.** The `nearest` and `any` models threshold the
 downstream-junction distance at 50 nt; they differ in *which* junction

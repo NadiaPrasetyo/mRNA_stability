@@ -43,7 +43,7 @@ each of three layers exposes a different fault class:
 
 | Layer | What it tests                          | Bug class it catches                                    |
 | ----- | -------------------------------------- | ------------------------------------------------------- |
-| 1     | `nmd_zone_length` per model            | Threshold inequality, junction iteration, window arithmetic |
+| 1     | `zone_length` per model                | Threshold inequality, junction iteration, window arithmetic |
 | 2     | `n_fragile_codons` / `n_alt_stops`     | In-frame vs out-of-frame iteration, codon-set membership    |
 | 3     | `apply_nmd_rule=False` shifts the zone | `metric_config` not threaded through to the model fn       |
 

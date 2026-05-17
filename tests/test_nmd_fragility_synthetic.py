@@ -4,7 +4,7 @@ Three assertion layers, each tied to a specific class of potential bug:
 
 * **Layer 1 — zone-length geometry.** For the 5-exon × 200-nt example
   documented in METRICS.md, the three models produce different
-  `nmd_zone_length` values (600 / 750 / 120). These are pure functions
+  `zone_length` values (600 / 750 / 120). These are pure functions
   of the spliced-coordinate machinery and the model's competent-zone
   definition; they are independent of sequence content. A bug in
   threshold inequality, junction iteration, or window arithmetic
@@ -121,13 +121,13 @@ def _read_single_row(tsv_path: Path) -> dict:
     ],
 )
 def test_zone_length(synthetic_paths, tmp_path, log, model, expected_zone_length):
-    """Layer 1: nmd_zone_length matches the geometry documented in METRICS.md."""
+    """Layer 1: zone_length matches the geometry documented in METRICS.md."""
     output = tmp_path / f"{model}.tsv"
     run_core(synthetic_paths, metric_config={}, output_path=output, model=model, log=log)
     row = _read_single_row(output)
-    actual = int(row["nmd_zone_length"])
+    actual = int(row["zone_length"])
     assert actual == expected_zone_length, (
-        f"[{synthetic_paths.strand} strand] {model}: nmd_zone_length mismatch. "
+        f"[{synthetic_paths.strand} strand] {model}: zone_length mismatch. "
         f"Expected {expected_zone_length} (per METRICS.md's 5x200 example), got {actual}."
     )
 
@@ -195,7 +195,7 @@ def test_distal_window_apply_nmd_rule_false(synthetic_paths, tmp_path, log):
     )
     row = _read_single_row(output)
     s = synthetic_paths.strand
-    assert int(row["nmd_zone_length"])  == 120, f"[{s}] zone length should be invariant under the toggle"
+    assert int(row["zone_length"])  == 120, f"[{s}] zone length should be invariant under the toggle"
     assert int(row["n_fragile_codons"]) == 3,   f"[{s}] expected 3 fragile codons in rule-off window"
     assert int(row["n_alt_stops"])      == 0,   f"[{s}] expected 0 alt-stops in rule-off window"
 

@@ -23,8 +23,8 @@ _NMD_THRESHOLD = 50      # nt; strict (> 50, not >= 50). Default for nearest/any
 _VALID_MODELS = ('nearest', 'any', 'distal_window')
 
 _HEADER = [
-    'transcript_id', 'gene_id', 'strand', 'nmd_model',
-    'cds_length', 'nmd_zone_length',
+    'transcript_id', 'gene_id', 'strand', 'model',
+    'cds_length', 'zone_length',
     'n_alt_stops', 'n_fragile_codons',
     'alt_stop_density', 'fragile_codon_density',
 ]
@@ -188,7 +188,7 @@ def _competent_zone_distal_window(start_s: int, cds_len: int, junctions: list[in
                                              at the junction is still excluded.
 
     If the available upstream CDS is shorter than the configured window, the
-    zone is clamped to the CDS boundary and `nmd_zone_length` reflects the
+    zone is clamped to the CDS boundary and `zone_length` reflects the
     actual scanned length (so densities normalise correctly).
     """
     is_competent = [False] * cds_len
@@ -254,7 +254,7 @@ def _compute_for_transcript(db, transcript, sequence: str, manifest_tx_id: str, 
 
     # Pass the metric_config to the model function
     is_competent = _MODEL_FN[model](start_s, cds_len, junctions, metric_config)
-    nmd_zone_length = sum(is_competent)
+    zone_length = sum(is_competent)
 
     n_alt_stops, n_fragile_codons = 0, 0
     for i in range(cds_len - 2):
@@ -265,9 +265,9 @@ def _compute_for_transcript(db, transcript, sequence: str, manifest_tx_id: str, 
         else:
             if codon in FRAGILE_CODONS: n_fragile_codons += 1
 
-    if nmd_zone_length > 0:
-        alt_stop_density = n_alt_stops / nmd_zone_length
-        fragile_codon_density = n_fragile_codons / nmd_zone_length
+    if zone_length > 0:
+        alt_stop_density = n_alt_stops / zone_length
+        fragile_codon_density = n_fragile_codons / zone_length
     else:
         alt_stop_density, fragile_codon_density = None, None
 
@@ -279,7 +279,7 @@ def _compute_for_transcript(db, transcript, sequence: str, manifest_tx_id: str, 
 
     return {
         'transcript_id': manifest_tx_id, 'gene_id': gene_id, 'strand': strand,
-        'nmd_model': model, 'cds_length': cds_len, 'nmd_zone_length': nmd_zone_length,
+        'model': model, 'cds_length': cds_len, 'zone_length': zone_length,
         'n_alt_stops': n_alt_stops, 'n_fragile_codons': n_fragile_codons,
         'alt_stop_density': alt_stop_density, 'fragile_codon_density': fragile_codon_density,
     }
