@@ -1,5 +1,5 @@
-"""metrics/nmd_fragility_any.py
-NMD fragility under the any-EJC model.
+"""metrics/nmd_fragility_full.py
+NMD fragility under the full-EJC model.
 
 A CDS position is NMD-competent iff the *last* downstream exon-exon
 junction is more than 50 nt past it. Equivalent: any sufficiently
@@ -22,9 +22,9 @@ from pathlib import Path
 
 from metrics import _nmd_fragility_core as _core
 
-log = logging.getLogger('metrics.nmd_fragility_any')
+log = logging.getLogger('metrics.nmd_fragility_full')
 
-OUTPUT_FILENAME = 'nmd_fragility_any.tsv'
+OUTPUT_FILENAME = 'nmd_fragility_full.tsv'
 
 
 def get_input_paths(paths, metric_config):
@@ -32,4 +32,4 @@ def get_input_paths(paths, metric_config):
 
 
 def compute(paths, metric_config, output_path: Path) -> None:
-    _core.run(paths, metric_config, output_path, model='any', log=log)
+    _core.run(paths, metric_config, output_path, model='full', log=log)

@@ -17,20 +17,42 @@ from lib.gff import (
 )
 
 _NA = 'NA'
-_NMD_THRESHOLD = 50      # nt; strict (> 50, not >= 50). Default for nearest/any
-                         # and the fallback default for distal_window's
+_NMD_THRESHOLD = 50      # nt; strict (> 50, not >= 50). Default for core/full
+                         # and the fallback default for window's
                          # configurable `nmd_threshold` key.
-_VALID_MODELS = ('nearest', 'any', 'distal_window')
+_VALID_MODELS = ('core', 'full', 'window')
 
 _HEADER = [
     'transcript_id', 'gene_id', 'strand', 'model',
     'cds_length', 'zone_length',
-    'n_alt_stops', 'n_fragile_codons',
-    'alt_stop_density', 'fragile_codon_density',
+    'n_transition_fragile_codons',
+    'n_transversion_fragile_codons',
+    'n_snv_fragile_codons',
+    'n_alt_stop_codons',
+    'transition_fragile_codon_density',
+    'transversion_fragile_codon_density',
+    'snv_fragile_codon_density',
+    'alt_stop_codon_density',
+    'transition_fraction_of_snv_fragile',
 ]
 
-ALT_STOPS = {'TAA', 'TAG', 'TGA'}
-FRAGILE_CODONS = {'CGA', 'CAG', 'CAA', 'TGG'}
+ALT_STOP_CODONS = {'TAA', 'TAG', 'TGA'}
+
+# Sense codons one transition away from a stop codon.
+TRANSITION_FRAGILE_CODONS = {'CGA', 'CAG', 'CAA', 'TGG'}
+
+# Sense codons one transversion away from a stop codon.
+TRANSVERSION_FRAGILE_CODONS = {
+    'AAA', 'AAG',
+    'AGA', 'GGA',
+    'GAA', 'GAG',
+    'TAC', 'TAT',
+    'TCA', 'TCG',
+    'TGC', 'TGT',
+    'TTA', 'TTG',
+}
+
+SNV_FRAGILE_CODONS = TRANSITION_FRAGILE_CODONS | TRANSVERSION_FRAGILE_CODONS
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +179,7 @@ def _start_codon_genomic_pos(start_codons, cds_features, strand: str) -> Optiona
 # Competent-zone definitions
 # ---------------------------------------------------------------------------
 
-def _competent_zone_nearest(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
+def _competent_zone_core(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
     is_competent = [False] * cds_len
     ji = 0
     while ji < len(junctions) and junctions[ji] <= start_s: ji += 1
@@ -168,7 +190,7 @@ def _competent_zone_nearest(start_s: int, cds_len: int, junctions: list[int], me
             is_competent[i] = True
     return is_competent
 
-def _competent_zone_any(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
+def _competent_zone_full(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
     is_competent = [False] * cds_len
     if not junctions: return is_competent
     last_junction = junctions[-1]
@@ -176,7 +198,7 @@ def _competent_zone_any(start_s: int, cds_len: int, junctions: list[int], metric
     for i in range(zone_end): is_competent[i] = True
     return is_competent
 
-def _competent_zone_distal_window(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
+def _competent_zone_window(start_s: int, cds_len: int, junctions: list[int], metric_config: dict) -> list[bool]:
     """Mark positions inside a configurable window anchored to the last junction.
 
     Config keys (all optional):
@@ -226,9 +248,9 @@ def _competent_zone_distal_window(start_s: int, cds_len: int, junctions: list[in
 
 
 _MODEL_FN = {
-    'nearest': _competent_zone_nearest,
-    'any': _competent_zone_any,
-    'distal_window': _competent_zone_distal_window,
+    'core': _competent_zone_core,
+    'full': _competent_zone_full,
+    'window': _competent_zone_window,
 }
 
 
@@ -256,20 +278,50 @@ def _compute_for_transcript(db, transcript, sequence: str, manifest_tx_id: str, 
     is_competent = _MODEL_FN[model](start_s, cds_len, junctions, metric_config)
     zone_length = sum(is_competent)
 
-    n_alt_stops, n_fragile_codons = 0, 0
+    n_transition_fragile_codons = 0
+    n_transversion_fragile_codons = 0
+    n_snv_fragile_codons = 0
+    n_alt_stop_codons = 0
+
     for i in range(cds_len - 2):
-        if not is_competent[i]: continue
+        # For NMD purposes, the biologically relevant position is the stop
+        # codon's termination point, not merely the first base of the codon.
+        # This matches the junction-distance convention used elsewhere in the
+        # pipeline: stop-codon distances are measured from the last nt of the
+        # stop codon in transcript coordinates.
+        if not is_competent[i + 2]:
+            continue
+
         codon = cds_seq[i:i + 3]
         if i % 3 != 0:
-            if codon in ALT_STOPS: n_alt_stops += 1
+            if codon in ALT_STOP_CODONS:
+                n_alt_stop_codons += 1
         else:
-            if codon in FRAGILE_CODONS: n_fragile_codons += 1
+            is_transition_fragile = codon in TRANSITION_FRAGILE_CODONS
+            is_transversion_fragile = codon in TRANSVERSION_FRAGILE_CODONS
+
+            if is_transition_fragile:
+                n_transition_fragile_codons += 1
+            if is_transversion_fragile:
+                n_transversion_fragile_codons += 1
+            if is_transition_fragile or is_transversion_fragile:
+                n_snv_fragile_codons += 1
 
     if zone_length > 0:
-        alt_stop_density = n_alt_stops / zone_length
-        fragile_codon_density = n_fragile_codons / zone_length
+        transition_fragile_codon_density = n_transition_fragile_codons / zone_length
+        transversion_fragile_codon_density = n_transversion_fragile_codons / zone_length
+        snv_fragile_codon_density = n_snv_fragile_codons / zone_length
+        alt_stop_codon_density = n_alt_stop_codons / zone_length
     else:
-        alt_stop_density, fragile_codon_density = None, None
+        transition_fragile_codon_density = None
+        transversion_fragile_codon_density = None
+        snv_fragile_codon_density = None
+        alt_stop_codon_density = None
+
+    if n_snv_fragile_codons > 0:
+        transition_fraction_of_snv_fragile = n_transition_fragile_codons / n_snv_fragile_codons
+    else:
+        transition_fraction_of_snv_fragile = None
 
     gene_id = ''
     for attr in ('gene_id', 'Parent'):
@@ -280,8 +332,15 @@ def _compute_for_transcript(db, transcript, sequence: str, manifest_tx_id: str, 
     return {
         'transcript_id': manifest_tx_id, 'gene_id': gene_id, 'strand': strand,
         'model': model, 'cds_length': cds_len, 'zone_length': zone_length,
-        'n_alt_stops': n_alt_stops, 'n_fragile_codons': n_fragile_codons,
-        'alt_stop_density': alt_stop_density, 'fragile_codon_density': fragile_codon_density,
+        'n_transition_fragile_codons': n_transition_fragile_codons,
+        'n_transversion_fragile_codons': n_transversion_fragile_codons,
+        'n_snv_fragile_codons': n_snv_fragile_codons,
+        'n_alt_stop_codons': n_alt_stop_codons,
+        'transition_fragile_codon_density': transition_fragile_codon_density,
+        'transversion_fragile_codon_density': transversion_fragile_codon_density,
+        'snv_fragile_codon_density': snv_fragile_codon_density,
+        'alt_stop_codon_density': alt_stop_codon_density,
+        'transition_fraction_of_snv_fragile': transition_fraction_of_snv_fragile,
     }
 
 

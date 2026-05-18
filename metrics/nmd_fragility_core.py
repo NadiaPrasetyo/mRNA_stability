@@ -1,5 +1,5 @@
-"""metrics/nmd_fragility_nearest.py
-NMD fragility under the nearest-EJC model.
+"""metrics/nmd_fragility_core.py
+NMD fragility under the core-EJC model.
 
 A CDS position is NMD-competent iff the *next* downstream exon-exon
 junction is more than 50 nt past it. Equivalent per-exon formulation:
@@ -22,9 +22,9 @@ from pathlib import Path
 
 from metrics import _nmd_fragility_core as _core
 
-log = logging.getLogger('metrics.nmd_fragility_nearest')
+log = logging.getLogger('metrics.nmd_fragility_core')
 
-OUTPUT_FILENAME = 'nmd_fragility_nearest.tsv'
+OUTPUT_FILENAME = 'nmd_fragility_core.tsv'
 
 
 def get_input_paths(paths, metric_config):
@@ -32,4 +32,4 @@ def get_input_paths(paths, metric_config):
 
 
 def compute(paths, metric_config, output_path: Path) -> None:
-    _core.run(paths, metric_config, output_path, model='nearest', log=log)
+    _core.run(paths, metric_config, output_path, model='core', log=log)

@@ -1,5 +1,5 @@
-"""metrics/nmd_fragility_distal_window.py
-NMD fragility under the distal-window model.
+"""metrics/nmd_fragility_window.py
+NMD fragility under the window model.
 
 This model hypothesises that the NMD machinery is most sensitive to
 premature stops located in a specific "proximal" window just prior
@@ -25,9 +25,9 @@ from pathlib import Path
 
 from metrics import _nmd_fragility_core as _core
 
-log = logging.getLogger('metrics.nmd_fragility_distal_window')
+log = logging.getLogger('metrics.nmd_fragility_window')
 
-OUTPUT_FILENAME = 'nmd_fragility_distal_window.tsv'
+OUTPUT_FILENAME = 'nmd_fragility_window.tsv'
 
 
 def get_input_paths(paths, metric_config):
@@ -35,4 +35,4 @@ def get_input_paths(paths, metric_config):
 
 
 def compute(paths, metric_config, output_path: Path) -> None:
-    _core.run(paths, metric_config, output_path, model='distal_window', log=log)
+    _core.run(paths, metric_config, output_path, model='window', log=log)

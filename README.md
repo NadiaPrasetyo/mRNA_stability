@@ -54,9 +54,9 @@ Currently implemented:
 | `junctions` | wide | exon-junction counts per region; spliced distances from start / stop codons to nearest junctions |
 | `architecture` | wide | exon counts and length stats (first / last / internal mean / median / SD); intron length stats |
 | `sequence_basic` | long (one row per transcript per region) | length, base composition, GC content, GC / AT skew, purine and amino ratios |
-| `nmd_fragility_nearest` | wide | NMD-tripwire density under the nearest-EJC model (next junction > 50 nt rule; per-exon competence) |
-| `nmd_fragility_any` | wide | NMD-tripwire density under the any-EJC model (last junction > 50 nt rule; contiguous CDS prefix) |
-| `nmd_fragility_distal_window` | wide | NMD-tripwire density in a configurable proximal window anchored to a terminal junction |
+| `nmd_fragility_core` | wide | NMD-tripwire density in the core regions of internal exons (per-exon 50 nt exclusion rule) |
+| `nmd_fragility_full` | wide | NMD-tripwire density across the full NMD-competent CDS prefix (last junction > 50 nt rule) |
+| `nmd_fragility_window` | wide | NMD-tripwire density in a configurable junction-anchored upstream window |
 | `uorf` | wide | classical and overlapping uORF counts, length stats, intercistronic distances |
 
 For planned metrics (`gc_by_position`, `kozak`, `stop_context`,
