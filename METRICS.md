@@ -193,6 +193,68 @@ metrics:
 
 ---
 
+## `stopfree.tsv`
+
+Longest stop-codon-free segment per transcript region. Long format — one
+row per `(transcript, region)` pair.
+
+| column                  | description                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `transcript_id`         | from `manifest.tsv`, preserved verbatim                                                                          |
+| `gene_id`               | normalised                                                                                                       |
+| `region`                | region name (`mRNA`, `CDS`, `5UTR`, `3UTR`, `start_codon_region`, `stop_codon_region`, `tail_region`, …)        |
+| `sequence_length`       | nt                                                                                                               |
+| `stopfree_length`       | nt; length of the longest span containing no in-frame TAA/TAG/TGA stop codon in the scanned frame/direction      |
+| `stopfree_fraction`     | `stopfree_length / sequence_length`; `NA` if `sequence_length == 0`                                              |
+| `direction`             | `forward` or `reverse`; `reverse` appears only when `forward_only: false`                                        |
+| `frame`                 | 1, 2, or 3 relative to the analysed orientation                                                                  |
+| `stopfree_start`        | 1-based inclusive start coordinate in the analysed orientation; `NA` for zero-length intervals                   |
+| `stopfree_end`          | 1-based inclusive end coordinate in the analysed orientation; `NA` for zero-length intervals                     |
+| `source_start`          | 1-based inclusive start coordinate mapped onto the original input sequence                                       |
+| `source_end`            | 1-based inclusive end coordinate mapped onto the original input sequence                                         |
+| `n_full_codons_scanned` | number of full codon positions assessed across the configured frames/directions                                  |
+| `n_stop_codons`         | number of TAA/TAG/TGA codons found across the configured frames/directions                                       |
+
+**What is being measured.** The scan walks each FASTA record independently.
+Within each tested frame, every in-frame stop codon ends the current
+stop-free interval; the metric keeps the longest interval seen across the
+configured frames and directions. A trailing partial codon is included in the
+final interval because the metric is a nucleotide span until the next in-frame
+stop, not a complete-codon count.
+
+**Default direction.** Extracted transcript regions are already in transcript
+5′→3′ orientation, so the default is `forward_only: true` — the three forward
+frames only. Set `forward_only: false` to scan the reverse complement too.
+This gives a six-frame stop-depletion style metric while retaining source
+coordinates for reverse hits.
+
+**Coordinate convention.** `stopfree_start` / `stopfree_end` are coordinates
+in the analysed sequence orientation. For forward hits these are identical to
+`source_start` / `source_end`. For reverse hits they refer to the
+reverse-complement sequence, while `source_start` / `source_end` map the same
+interval back to the original input sequence.
+
+**Optional config:**
+
+```
+metrics:
+  stopfree:
+    enabled: true
+    regions: [mRNA, CDS, 5UTR, 3UTR]  # explicit region list; optional
+    skip_regions: [tail_region]       # extra skips beyond UTR_pair; optional
+    forward_only: true                # false scans all 6 frames
+```
+
+**Sharp edges:**
+
+* `UTR_pair` is skipped by default because its 3-line-per-record
+  ViennaRNA-constraint format is not standard FASTA.
+* T and U are treated equivalently. Ambiguous bases do not match stop codons;
+  they simply allow an interval to continue unless a canonical stop is found
+  elsewhere in-frame.
+* Ties are deterministic: the first longest interval encountered wins, in
+  forward frames before reverse frames.
+
 ## `nmd_fragility_{core,full,window}.tsv`
 
 Density of NMD tripwires in the NMD-competent zones of the CDS:

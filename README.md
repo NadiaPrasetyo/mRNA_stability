@@ -54,6 +54,7 @@ Currently implemented:
 | `junctions` | wide | exon-junction counts per region; spliced distances from start / stop codons to nearest junctions |
 | `architecture` | wide | exon counts and length stats (first / last / internal mean / median / SD); intron length stats |
 | `sequence_basic` | long (one row per transcript per region) | length, base composition, GC content, GC / AT skew, purine and amino ratios |
+| `stopfree` | long (one row per transcript per region) | longest stop-codon-free span across 3 forward frames by default, or all 6 frames if configured |
 | `nmd_fragility_core` | wide | NMD-tripwire density in the core regions of internal exons (per-exon 50 nt exclusion rule) |
 | `nmd_fragility_full` | wide | NMD-tripwire density across the full NMD-competent CDS prefix (last junction > 50 nt rule) |
 | `nmd_fragility_window` | wide | NMD-tripwire density in a configurable junction-anchored upstream window |
@@ -79,6 +80,10 @@ In the dataset YAML, enable plugins under a `metrics:` block:
         # Optional per-plugin config. See METRICS.md for the full list.
         # regions: [mRNA, CDS, 5UTR, 3UTR]   # explicit override of auto-discovery
         # skip_regions: [tail_region]        # additional skips beyond defaults
+      stopfree:
+        enabled: true
+        # Optional: regions: [mRNA, CDS, 5UTR, 3UTR]
+        # Optional: forward_only: true         # false scans all 6 frames
 
     # Optional: shared registry of paths to species-specific reference tables.
     # Keys are plugin-defined; consult each plugin's docstring (or METRICS.md)
