@@ -300,12 +300,24 @@ feature_response_scatter <- function(df,
     dplyr::select(-.thr)
 
   # --- Display labels (R4) -------------------------------------------------
+  # group_label() dispatches per element: selection keys (group / supergroup /
+  # other) via format_group_name(); standalone columns via format_col_name().
+  # Standalones are no longer in the group table, so this is the only correct
+  # route for them.
+  group_label <- function(g) {
+    ifelse(g %in% names(FEATURE_PATTERNS) |
+             g %in% c("structure", "intrinsic", "splicing",
+                      "regulatory", "other"),
+           format_group_name(g, kind = "auto"),
+           formatter(g))
+  }
+
   result <- result |>
     dplyr::mutate(
       display_label = dplyr::case_when(
-        collapse == "group"  ~ format_group_name(group),
+        collapse == "group"  ~ group_label(group),
         collapse == "region" ~ paste0(
-          format_group_name(group),
+          group_label(group),
           ifelse(region == "none", "",
                  paste0(" — ", format_col_name(region)))
         ),
@@ -315,15 +327,9 @@ feature_response_scatter <- function(df,
     )
 
   # --- Build the plot ------------------------------------------------------
-  # Use group as the colour aesthetic; legend label via format_group_name
-  # (or format_col_name for standalones). Region is shape.
-  legend_labeller <- function(g) {
-    ifelse(g %in% names(FEATURE_PATTERNS) |
-             g %in% c("structure", "intrinsic", "splicing",
-                      "regulatory", "other"),
-           format_group_name(g),
-           formatter(g))
-  }
+  # Colour aesthetic is group; legend label reuses the same per-element
+  # dispatch as the in-plot labels.
+  legend_labeller <- group_label
 
   # Make the categorical axes factors so legend ordering is consistent
   group_order <- intersect(names(palette), unique(result$group))

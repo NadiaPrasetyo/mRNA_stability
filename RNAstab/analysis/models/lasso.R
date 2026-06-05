@@ -28,16 +28,9 @@ suppressPackageStartupMessages({
 # name. The helper `assemble_predictors()` resolves them against a dataframe.
 
 DEFAULT_LASSO_PREDICTORS <- list(
-  groups = c("lengths",   "lengths_some",  "gc",   "nmd", "architecture",   
-                  "junctions",      
-              "uorfs",   "stopfree",    "skews",   "distances",      
-            "codon_freqs", "aa_freqs", "nuc_ratios"),
-  # groups = c("lengths",         "lengths_some",    "gc",              "nmd",             "architecture",   
-  #            "mfe_scores",      "mfe_zscores",     "rnafold_scores",  "rnafold_zscores", "mfe_deltas",     
-  #            "mfe_expected",    "rnalfold_scores",     "rnalfold_zscores",    "rnaup",           "junctions",      
-  #            "uorfs",   "stopfree",        "skews",           "distances",      
-  #            "codon_freqs", "aa_freqs", "nuc_ratios"),
-  columns = c()
+  groups = c("lengths", "gc",   "nmd", "architecture",   
+              "junctions", "uorfs",   "stopfree",    "skews",   "distances",      
+              "codon_freqs", "aa_freqs", "nuc_ratios"), columns = c()
 )
 
 

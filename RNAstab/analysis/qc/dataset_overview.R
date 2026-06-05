@@ -120,46 +120,57 @@ halflife_distribution_plot <- function(df, formatter = format_col_name) {
 
 #' Tile heatmap of mean % non-NA per feature group × species.
 #'
-#' For each group in FEATURE_PATTERNS, computes the average non-NA rate
-#' across all member columns, per species. Tile text shows percentage and
-#' the number of columns in the group.
+#' For each resolved group, computes the average non-NA rate across all member
+#' columns, per species. Tile text shows percentage and the number of columns
+#' in the group. Selection is resolved through the project selection layer, so
+#' `groups` accepts FEATURE_PATTERNS keys, supergroup names, and bundle names;
+#' supergroups expand to one tile per member group (R3a). `pick`/`drop` refine
+#' a group's columns and merge with any pick/drop a named bundle carries
+#' (caller wins per group key).
 #'
 #' @param df         Dataframe from build_dataset() or build_all().
-#' @param groups     Character vector of FEATURE_PATTERNS keys. Defaults to
-#'                   all groups except `lengths_some` (redundant subset of
-#'                   `lengths`).
-#' @param formatter  Display formatter (default format_col_name).
+#' @param groups     Character vector of group / supergroup / bundle names, or
+#'                   NULL (default) = every FEATURE_PATTERNS key.
+#' @param pick       Named list: group key -> columns to keep (allow-list).
+#' @param drop       Named list: group key -> columns to remove.
+#' @param formatter  Display formatter for the species axis (default
+#'                   format_col_name). Group-axis labels use format_group_name.
 #' @return list(plot, table). Table: species, group, n_columns,
 #'   mean_nonna_pct, min_nonna_pct, n_columns_all_na.
 missingness_by_group_plot <- function(df,
                                       groups    = NULL,
+                                      pick      = list(),
+                                      drop      = list(),
                                       formatter = format_col_name) {
 
   if (!"species" %in% names(df)) {
     stop("species column missing — pipeline invariant violated")
   }
 
-  if (is.null(groups)) {
-    # Exclude lengths_some (redundant subset of lengths). rnafold_scores and
-    # mfe_scores are aliases; same for rnafold_zscores / mfe_zscores.
-    groups <- setdiff(names(FEATURE_PATTERNS),
-                      c("lengths_some", "mfe_scores", "mfe_zscores"))
-  }
+  # Resolve the selection ONCE (not per species): expand supergroups/bundles
+  # and merge bundle pick/drop with the caller's. Per-species column refinement
+  # happens inside the loop. (resolve_selection() does not report pick/drop
+  # names that match nothing — select_features() does; this plot does not need
+  # that, and its default carries no pick/drop.)
+  sel    <- resolve_selection(groups, pick, drop)
+  gkeys  <- sel$groups
 
   result <- purrr::map_dfr(unique(df$species), function(sp) {
     sub <- df |> dplyr::filter(species == sp)
-    purrr::map_dfr(groups, function(g) {
+    purrr::map_dfr(gkeys, function(g) {
 
-      # R3: use fg_columns, not hand-rolled regex
-      cols <- fg_columns(sub, g)
+      # R3 / R3a: enumerate via fg_columns, refine via the shared helper so
+      # bundle- and caller-supplied pick/drop apply identically to every plot.
+      cols <- refine_group_columns(fg_columns(sub, g),
+                                   sel$pick[[g]], sel$drop[[g]])
 
       if (length(cols) == 0) {
         tibble::tibble(
-          species         = sp,
-          group           = g,
-          n_columns       = 0L,
-          mean_nonna_pct  = NA_real_,
-          min_nonna_pct   = NA_real_,
+          species          = sp,
+          group            = g,
+          n_columns        = 0L,
+          mean_nonna_pct   = NA_real_,
+          min_nonna_pct    = NA_real_,
           n_columns_all_na = 0L
         )
       } else {
@@ -179,16 +190,14 @@ missingness_by_group_plot <- function(df,
     })
   })
 
-  # Order y-axis by overall coverage (worst at bottom)
+  # Order y-axis by overall coverage (worst at bottom). Keep the raw group key
+  # as the factor value; map to display labels with a labeller at draw time
+  # (R4 for the selection-key namespace).
   result <- result |>
     dplyr::mutate(
-      # 1. Convert to factor
       group = factor(group),
-      # 2. Drop levels that have no columns (where n_columns == 0)
-      # Or just drop levels that aren't present in this specific result set
       group = forcats::fct_drop(group),
-      # 3. Now reorder safely
-      group = forcats::fct_reorder(group, mean_nonna_pct, 
+      group = forcats::fct_reorder(group, mean_nonna_pct,
                                    .fun = mean, .na_rm = TRUE)
     )
   p <- ggplot2::ggplot(
@@ -202,6 +211,9 @@ missingness_by_group_plot <- function(df,
                                           mean_nonna_pct, n_columns,
                                           ifelse(n_columns == 1, "", "s")))),
       size = 3, colour = "black"
+    ) +
+    ggplot2::scale_y_discrete(
+      labels = function(x) format_group_name(x, kind = "group")
     ) +
     ggplot2::scale_fill_gradient2(
       low = "#b2182b", mid = "#f7f7f7", high = "#2166ac",

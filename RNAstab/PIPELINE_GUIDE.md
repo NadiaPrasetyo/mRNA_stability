@@ -236,7 +236,8 @@ These are the functions every extender code should rely on. DO NOT reach into in
 | `expand_groups(groups)`                   | `R/utils/feature_groups.R` | Group/supergroup/bundle names → `FEATURE_PATTERNS` keys        |
 | `SUPERGROUPS`                             | constant in `R/config.R`   | Coarse group → member-group categorisation                     |
 | `GROUP_BUNDLES`                           | constant in `R/config.R`   | Reusable named selections (intent, not schema)                 |
-| `format_col_name(x)`              | `R/utils/naming.R`                         | Canonical → display string (vectorised)          |
+| `format_col_name(x)`              | `R/utils/naming.R`                         | Canonical column name → display string (vectorised) |
+| `format_group_name(x, kind)`      | `R/utils/palettes.R`                       | Group / supergroup / bundle key → display string (vectorised) |
 | `clear_snapshot(species)`         | `R/io/cache.R`                             | Force next build to rebuild                      |
 | `REGIONS`                         | constant in `R/config.R`                   | The legal region suffix vocabulary               |
 | `FEATURE_PATTERNS`                | constant in `R/config.R`                   | Group → regex registry                           |
@@ -320,6 +321,28 @@ than retyping `pick`/`drop`. Bundles are intent, defined in `GROUP_BUNDLES`
 resolve all three through `resolve_selection()` + `refine_group_columns()` (see
 §6.1, step 3). This keeps selection semantics identical across every plot and is
 the only sanctioned way to refine a group inside a plot.
+
+**Labelling a group / supergroup / bundle key.** `format_col_name()` is for
+*column* names and produces wrong output on selection keys (`aa_freqs` →
+"AA freq. freqs", `gc` → "gc"). When a plot renders a group, supergroup, or
+bundle **key** as visible text — a facet strip, a legend, an axis tick keyed by
+group — pass it through `format_group_name(key, kind)` instead, where `kind` is
+one of `"group"`, `"supergroup"`, `"bundle"`, or `"auto"` (resolve the namespace
+with the same supergroup → bundle → group precedence as `resolve_selection()`).
+Pass an explicit `kind` when the caller knows it (a plot that always resolves to
+group keys passes `kind = "group"`); reserve `"auto"` for mixed-token input.
+Display strings live in three maps in `R/utils/palettes.R` —
+`FEATURE_GROUP_DISPLAY_NAMES`, `SUPERGROUP_DISPLAY_NAMES`, `BUNDLE_DISPLAY_NAMES`
+— seeded where the `tools::toTitleCase` fallback would be wrong. Add a map entry
+rather than hardcoding a label in the plot.
+
+**Standalones are columns, not group keys.** `cai`, `translation_efficiency`,
+`expression`, and `orfexondensity` are NOT in the group table — they are
+labelled by `format_col_name()`. A plot whose group column mixes selection keys
+with standalones (e.g. `feature_response_scatter.R`) dispatches per element:
+selection keys via `format_group_name()`, everything else via
+`format_col_name()`. `group_panel_sweep.R` is the single-group exception and
+labels columns only — it does NOT use `format_group_name()`.
  
 **Exception — single-group tools.** A tool whose entire premise is "one panel
 per schema family" (e.g. `feature_group_panel_sweep()`) operates on raw

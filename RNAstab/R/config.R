@@ -67,14 +67,20 @@ SPECIES_CONFIG <- list(
 # Regex patterns defining named groups of columns. Use downstream with
 # `fg()` / `fg_columns()`. Add a new group by appending a named entry.
 #
+# Display labels for the selection-key namespace below — FEATURE_PATTERNS keys,
+# SUPERGROUPS names, and GROUP_BUNDLES names — live in R/utils/palettes.R as
+# FEATURE_GROUP_DISPLAY_NAMES / SUPERGROUP_DISPLAY_NAMES / BUNDLE_DISPLAY_NAMES,
+# formatted via format_group_name(). Add a label there, not here, when a key
+# needs a nicer display string than its title-cased name. Standalone columns
+# (cai, translation_efficiency, expression, orfexondensity) are labelled as
+# columns via format_col_name() (R/utils/naming.R), not as group keys.
+#
 
 FEATURE_PATTERNS <- list(
   lengths        = "^length_",
   gc             = "^gc_",
   nmd            = "^nmd_",
   architecture   = "^(intron_|exon_|noncoding_)", 
-  mfe_scores     = "^rnafold_score_",
-  mfe_zscores    = "^rnafold_zscore_",
   rnafold_scores = "^rnafold_score_",
   rnafold_zscores = "^rnafold_zscore_",
   rnafold_per_nt = "^rnafold_per_nt_",

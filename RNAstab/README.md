@@ -101,8 +101,14 @@ Columns are named `{metric}_{region}` in lowercase, e.g. `rnafold_zscore_5utr`,
 `length_cds`, `gc_3utr`. Half-life is just `halflife`. The species lives in a
 column, not in column names. This is what makes the cross-species stack work.
 
-For pretty plot labels, `format_col_name()` turns canonical names into
-display strings (`"mfe_zscore_5utr"` → `"MFE z-score 5' UTR"`).
+For pretty plot labels, `format_col_name()` (in `R/utils/naming.R`) turns
+canonical column names into display strings (`"mfe_zscore_5utr"` →
+`"MFE z-score 5' UTR"`). Its sibling `format_group_name()` (in
+`R/utils/palettes.R`) does the same for *selection keys* — group, supergroup,
+and bundle names (`"rnafold_zscores"` → `"MFE z-score"`, `"nmd_reported"` →
+`"NMD (reported)"`) — for plots that label a facet strip or legend by group.
+Standalone columns (`cai`, `expression`, …) are labelled as columns by
+`format_col_name()`, not by `format_group_name()`.
 
 ### Region vocabulary
 

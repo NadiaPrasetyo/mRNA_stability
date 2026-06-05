@@ -153,26 +153,78 @@ FEATURE_GROUP_DISPLAY_NAMES <- c(
   nmd                    = "NMD fragility",
   uorfs                  = "uORFs",
   orfs                   = "ORFs",
-  cai                    = "CAI",
-  translation_efficiency = "Translation efficiency",
-  expression             = "Expression",
-  orfexondensity         = "ORF-exon density",
   other                  = "Other"
 )
 
+# Standalone reserved columns (cai, translation_efficiency, expression,
+# orfexondensity) are deliberately NOT in this table: they are columns, not
+# group keys, and are labelled via format_col_name() in R/utils/naming.R. A
+# plot whose `group` column can hold a standalone (e.g. the response scatter)
+# dispatches per element — group keys via format_group_name(), everything else
+# via format_col_name(). `other` stays here: it is a display bucket that sits
+# alongside group keys in facets/legends, not a column.
 
-#' Display name for a feature group key.
+#' Supergroup name -> display label. The four supergroups are clean words; the
+#' toTitleCase fallback in format_group_name() renders them ("structure" ->
+#' "Structure"), so this is seeded only for exceptions (currently none).
+SUPERGROUP_DISPLAY_NAMES <- c(
+)
+
+#' Bundle name -> display label.
+BUNDLE_DISPLAY_NAMES <- c(
+  nmd_reported = "NMD (reported)",
+  lengths_core = "Core lengths"
+)
+
+
+#' Display name for a selection key (group / supergroup / bundle).
 #'
-#' Falls back to title-cased underscore replacement for keys not in the
-#' lookup table. Vectorised.
+#' Looks the key up in the table for its `kind`; on a miss, falls back to
+#' title-cased underscore replacement. Vectorised.
+#'
+#' This is the SELECTION-key namespace only. Standalone columns (cai,
+#' expression, …) are NOT handled here — they are columns and use
+#' format_col_name(). A plot whose group column mixes selection keys with
+#' standalones must dispatch per element (see feature_response_scatter.R).
+#'
+#' @param g    Character vector of group / supergroup / bundle keys.
+#' @param kind One of "group", "supergroup", "bundle", or "auto". "auto"
+#'   resolves each token's namespace with the same precedence as
+#'   resolve_selection(): supergroup -> bundle -> group, first match wins.
+#'   Pass an explicit kind when known. Default "auto" keeps existing
+#'   single-argument callers working unchanged.
+#' @return Character vector of display strings, same length as `g`.
 #' @export
-format_group_name <- function(g) {
-  out <- FEATURE_GROUP_DISPLAY_NAMES[g]
-  missing_idx <- is.na(out)
-  if (any(missing_idx)) {
-    out[missing_idx] <- tools::toTitleCase(gsub("_", " ", g[missing_idx]))
-  }
-  unname(out)
+format_group_name <- function(g, kind = c("auto", "group",
+                                          "supergroup", "bundle")) {
+  kind <- match.arg(kind)
+
+  bundles <- if (exists("GROUP_BUNDLES", inherits = TRUE)) {
+    names(GROUP_BUNDLES)
+  } else character()
+
+  pick_table <- function(k) switch(k,
+    group      = FEATURE_GROUP_DISPLAY_NAMES,
+    supergroup = SUPERGROUP_DISPLAY_NAMES,
+    bundle     = BUNDLE_DISPLAY_NAMES
+  )
+
+  vapply(g, function(key) {
+    this_kind <- kind
+    if (this_kind == "auto") {
+      this_kind <-
+        if      (exists("SUPERGROUPS", inherits = TRUE) &&
+                 key %in% names(SUPERGROUPS))       "supergroup"
+        else if (key %in% bundles)                  "bundle"
+        else                                        "group"
+    }
+    tbl <- pick_table(this_kind)
+    if (!is.null(tbl) && key %in% names(tbl)) {
+      unname(tbl[[key]])
+    } else {
+      tools::toTitleCase(gsub("_", " ", key))
+    }
+  }, character(1), USE.NAMES = FALSE)
 }
 
 

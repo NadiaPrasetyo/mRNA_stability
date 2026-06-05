@@ -49,14 +49,14 @@ REPLACEMENTS <- list(
   list("nmd_alt_stop_codon_density_", "NMD alt-stop count "),
   list("nmd_transition_fraction_of_snv_fragile_", "NMD transition fragile codon fraction "),
   list("nmd_transition_fragile_codon_density_", "NMD transition fragile codon density "),
-
+  
   # --- Architecture (v4: whole-transcript scalars, *_mrna suffix) ---
   list("^intron_length_mean_",         "Mean intron length "),
   list("^exon_length_first_",          "First exon length "),
   list("^exon_length_last_",           "Last exon length "),
   list("^exon_count_internal_",        "Number of internal exons "),
   list("^noncoding_length_fraction_",  "Non-coding length fraction "),
-
+  
   # --- Sequence Basic ---
   list("^frac_a",                "Adenine fraction"),
   list("^frac_c",                "Cytosine fraction"),
@@ -67,17 +67,17 @@ REPLACEMENTS <- list(
   list("^purine_ratio_",               "Purine ratio "),
   list("^amino_ratio_",                "Amino ratio "),
   list("^gc_content_",                 "GC content "),
-
+  
   # --- Junctions (v3: count is feature-first; EEJ distances metric-first) ---
   list("^junctions_count_",            "Junction count "),
   list("^eej_dist_downstream",             "Closest EEJ dist. downstream"),
   list("^eej_dist_upstream_",              "Closest EEJ dist. upstream "),
-
+  
   # --- uORFs (v4: whole-transcript scalars, *_mrna suffix) ---
   list("^uorf_count_",                 "uORF count "),
   list("^uorf_present_",               "Has uORF "),
   list("^dist_cap_to_first_uatg_",     "Dist. cap to first uATG "),
-
+  
   # --- Identifiers / metadata ---
   list("^halflife$",                       "Half-life"),
   list("^gene_name$",                      "Gene name"),
@@ -87,7 +87,7 @@ REPLACEMENTS <- list(
   list("^saluki_prediction$",              "Saluki prediction"),
   list("^prediction_difference$",          "Prediction difference"),
   list("^species$",                        "Species"),
-
+  
   # --- Compound metric tokens (handled before component splitting) ---
   list("^rnafold_zscore_",                 "MFE z-score "),
   list("^rnafold_score_",                  "MFE "),
@@ -102,7 +102,7 @@ REPLACEMENTS <- list(
   list("^rnaup_zscore_",                   "RNAup z-score "),
   list("^rnaup_score_",                    "RNAup "),
   list("^rnaup_pval_",                     "RNAup p-value "),
-  list("^junctions_density_",              "ORF Junction density "),
+  list("^junctions_density_",              "Junction density "),
   list("^junctions_",                      "Junctions "),
   list("^orf_percent_length_",             "uORF % length "),
   list("^orf_number_",                     "uORF count "),
@@ -128,7 +128,7 @@ REPLACEMENTS <- list(
   list("^gini_cytoplasm_",                 "icSHAPE Gini cytoplasm "),
   # list("^shape_",                          "icSHAPE "),
   # list("^keth_",                           "Keth-seq "),
-
+  
   # --- Region suffixes ---
   # Each rule matches a single leading separator — space OR underscore —
   # plus the region token, end-anchored (`[ _]<region>$`). The separator is
