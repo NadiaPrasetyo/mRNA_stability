@@ -23,17 +23,17 @@ Split-FASTA mode:
       --species "Homo sapiens"
 
   Rules:
-  • --fasta-cds must contain exactly ONE sequence used as the shared CDS
-    for every sample.  Junction and NMD metrics are therefore identical
-    across all samples (they depend only on CDS structure).
-  • --fasta-5utr / --fasta-3utr must have matching accession IDs.
-    Use --allow-missing-utrs to treat absent partners as zero-length.
-  • No GFF download is needed.  All annotation (CDS=, UTR5=, UTR3=)
-    is synthesised from the input lengths and written into the assembled
-    FASTA headers automatically.
-  • All other metrics (CAI, codon counts, sequence_basic, stopfree, uORF,
-    architecture, junctions, NMD fragility) run unchanged against the
-    assembled transcripts.
+  • --fasta-cds must contain exactly ONE sequence.  That single CDS is
+    used as the shared baseline for every sample.  Junction and NMD
+    metrics therefore depend only on CDS structure and are identical
+    across all samples.
+  • --fasta-5utr / --fasta-3utr must have matching accession IDs (the
+    first whitespace-delimited token after '>').  Use --allow-missing-utrs
+    to treat absent partners as zero-length rather than erroring.
+  • No GFF download is required.  CDS/UTR coordinates are derived from
+    the assembled sequence lengths and written as a canonical.gff so
+    GFF-dependent plugins (junctions, architecture, NMD, uORF) work
+    without modification.
 
 Shared flags:
   --metric NAME    run only this plugin (repeatable)
@@ -44,6 +44,7 @@ Shared flags:
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib
 import logging
 import os
@@ -56,11 +57,9 @@ _THIS         = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-# Import lib.paths first (needed even before add_project_root_to_syspath so we
-# can call it).  This works because _PROJECT_ROOT is already on sys.path above.
 from lib.paths import PathContext, resolve_paths, add_project_root_to_syspath  # noqa: E402
 
-# Ensure lib.* is importable in every mode (not just dataset mode).
+# Ensure lib.* is importable in every mode from the start.
 add_project_root_to_syspath(_PROJECT_ROOT)
 
 logging.basicConfig(
@@ -70,9 +69,9 @@ logging.basicConfig(
 )
 log = logging.getLogger('metrics')
 
-# Plugins that read GFF annotation (junctions, NMD, uORF, architecture).
-# In split-FASTA mode these still run — annotation is synthesised from
-# FASTA header tags so no external GFF download is required.
+# Plugins that read GFF / extract_dir annotation.  In split-FASTA mode
+# these still run: annotation is synthesised from sequence lengths so no
+# external GFF download is needed.
 _GFF_DEPENDENT_PLUGINS: frozenset[str] = frozenset({
     'architecture',
     'junctions',
@@ -135,15 +134,11 @@ def _list_available_plugins() -> list[str]:
     )
 
 
-def _run_one_plugin(
-    name: str,
-    mcfg: dict,
-    paths,          # PathContext or the split-FASTA shim
-    force: bool,
-) -> bool:
+def _run_one_plugin(name: str, mcfg: dict, paths, force: bool) -> bool:
     """
-    Run a single plugin.  Returns True on success (including 'skipped'),
-    False on failure.
+    Load and run one plugin.
+    Returns True on success (including 'skipped as current'), False on failure.
+    *paths* is a real PathContext (dataset mode) or the split-FASTA shim.
     """
     plugin_log = logging.getLogger(f'metrics.{name}')
 
@@ -189,7 +184,7 @@ def _run_one_plugin(
 
 
 def _run_plugins(plugins: dict, paths, force: bool) -> None:
-    """Run *plugins* {name: mcfg} dict against *paths*, exit on any failure."""
+    """Run every plugin in *plugins* {name: mcfg}; exit(1) on any failure."""
     log.info(f"Running {len(plugins)} metric(s): {', '.join(plugins)}")
     paths.metrics_dir.mkdir(parents=True, exist_ok=True)
     n_ok = sum(_run_one_plugin(n, m, paths, force) for n, m in plugins.items())
@@ -242,11 +237,13 @@ def _run_dataset_mode(args: argparse.Namespace) -> None:
 # Split-FASTA helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── FASTA I/O ─────────────────────────────────────────────────────────────────
+
 def _read_raw_fasta(path: Path) -> dict[str, str]:
     """Return {seq_id: uppercase_sequence} for every record in *path*."""
     seqs: dict[str, str] = {}
     cur_id: Optional[str] = None
-    parts:  list[str]     = []
+    parts:  list[str] = []
 
     with open(path) as fh:
         for line in fh:
@@ -271,8 +268,8 @@ def _read_single_sequence(path: Path) -> Tuple[str, str]:
     Returns (seq_id, sequence).  Raises ValueError otherwise.
     """
     seqs = _read_raw_fasta(path)
-    if len(seqs) == 0:
-        raise ValueError(f"CDS FASTA is empty: {path}")
+    if not seqs:
+        raise ValueError(f"--fasta-cds is empty: {path}")
     if len(seqs) > 1:
         ids = ', '.join(list(seqs)[:5]) + ('…' if len(seqs) > 5 else '')
         raise ValueError(
@@ -281,6 +278,17 @@ def _read_single_sequence(path: Path) -> Tuple[str, str]:
         )
     return next(iter(seqs.items()))
 
+
+def _write_fasta(path: Path, records: Iterable[Tuple[str, str]]) -> None:
+    """Write (seq_id, sequence) pairs to *path*, 60-char wrapped."""
+    with open(path, 'w') as fh:
+        for seq_id, seq in records:
+            fh.write(f'>{seq_id}\n')
+            for i in range(0, len(seq), 60):
+                fh.write(seq[i:i+60] + '\n')
+
+
+# ── Assembly ──────────────────────────────────────────────────────────────────
 
 def _assemble_transcripts(
     path_5utr: Path,
@@ -298,11 +306,13 @@ def _assemble_transcripts(
     cds_id, cds_seq = _read_single_sequence(path_cds)
     cds_len = len(cds_seq)
     log.info(f"Shared CDS: '{cds_id}'  {cds_len} nt")
+    if cds_len % 3 != 0:
+        log.warning(f"CDS length {cds_len} nt is not divisible by 3.")
 
     seqs_5 = _read_raw_fasta(path_5utr)
     seqs_3 = _read_raw_fasta(path_3utr)
-
     ids_5, ids_3 = set(seqs_5), set(seqs_3)
+
     if ids_5 != ids_3:
         only_5 = sorted(ids_5 - ids_3)
         only_3 = sorted(ids_3 - ids_5)
@@ -325,64 +335,192 @@ def _assemble_transcripts(
 
     log.info(
         f"Assembled {len(records)} transcript(s)  "
-        f"({len(seqs_5)} × 5UTR + 1 CDS + {len(seqs_3)} × 3UTR)."
+        f"({len(seqs_5)} × 5UTR  +  1 shared CDS  +  {len(seqs_3)} × 3UTR)."
     )
     return records
 
 
-def _write_assembled_fasta(
+# ── extract_dir builder ───────────────────────────────────────────────────────
+#
+# Reproduces the file tree that metric plugins expect, without any
+# external library (no lib.fasta_to_extract, no lib.fasta_header_parser).
+# All annotation is synthesised from the assembled sequence lengths.
+
+_MANIFEST_COLS = [
+    'transcript_id', 'gene_id', 'region', 'length',
+    'source_file', 'seqid', 'strand',
+]
+
+
+def _build_extract_dir(
     records: List[Tuple[str, str, int, int, int]],
-    out_path: Path,
+    source_fasta: Path,
+    extract_dir: Path,
+    force: bool = False,
 ) -> None:
     """
-    Write assembled transcripts with synthesised annotation header tags:
-      CDS=<start>..<end>  UTR5=1..<len>  UTR3=<start>..<end>
-    All coordinates 1-based inclusive, matching the header parser convention.
-    UTR tags are omitted when the UTR is zero-length.
+    Write the extract_dir file tree consumed by metric plugins:
+      manifest.tsv          one mRNA + optional region rows per sample
+      canonical.gff         GFF3 with gene/mRNA/exon/CDS/UTR features
+      extracted_mRNA.fa     full assembled transcripts
+      extracted_CDS.fa      CDS slices (shared sequence, one record per sample)
+      extracted_5UTR.fa     5' UTR slices  (omitted if all zero-length)
+      extracted_3UTR.fa     3' UTR slices  (omitted if all zero-length)
+
+    Skips rebuild if manifest.tsv is newer than source_fasta and not *force*.
     """
-    with open(out_path, 'w') as fh:
-        for sample_id, seq, u5_len, cds_len, u3_len in records:
-            cds_s = u5_len + 1
-            cds_e = u5_len + cds_len
-            tags  = [f"CDS={cds_s}..{cds_e}"]
-            if u5_len > 0:
-                tags.append(f"UTR5=1..{u5_len}")
-            if u3_len > 0:
-                tags.append(f"UTR3={cds_e + 1}..{cds_e + u3_len}")
-            fh.write(f'>{"|".join([sample_id] + tags)}\n')
-            for i in range(0, len(seq), 60):
-                fh.write(seq[i:i+60] + '\n')
-    log.info(f"Assembled FASTA → {out_path}  ({len(records)} records)")
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = extract_dir / 'manifest.tsv'
+
+    if (not force
+            and sentinel.exists()
+            and sentinel.stat().st_mtime > source_fasta.stat().st_mtime):
+        log.info(f"extract_dir is current ({extract_dir}) — skipping rebuild.")
+        return
+
+    log.info(f"Building extract_dir → {extract_dir}")
+
+    manifest_rows: list[dict] = []
+    gff_lines:     list[str]  = ['##gff-version 3']
+    mrna_recs:     list[Tuple[str, str]] = []
+    utr5_recs:     list[Tuple[str, str]] = []
+    cds_recs:      list[Tuple[str, str]] = []
+    utr3_recs:     list[Tuple[str, str]] = []
+
+    src = str(source_fasta)
+
+    for sample_id, full_seq, u5_len, cds_len, u3_len in records:
+        seq_len  = len(full_seq)
+        gene_id  = sample_id   # use sample ID as gene ID (no separate gene names)
+        strand   = '+'
+
+        # 0-based half-open coordinates
+        u5_s,  u5_e  = 0,              u5_len
+        cds_s, cds_e = u5_len,         u5_len + cds_len
+        u3_s,  u3_e  = u5_len + cds_len, seq_len
+
+        # ── manifest rows ─────────────────────────────────────────────────
+        manifest_rows.append({
+            'transcript_id': sample_id, 'gene_id': gene_id,
+            'region': 'mRNA', 'length': seq_len,
+            'source_file': src, 'seqid': sample_id, 'strand': strand,
+        })
+        mrna_recs.append((sample_id, full_seq))
+
+        if u5_len > 0:
+            manifest_rows.append({
+                'transcript_id': sample_id, 'gene_id': gene_id,
+                'region': '5UTR', 'length': u5_len,
+                'source_file': src, 'seqid': sample_id, 'strand': strand,
+            })
+            utr5_recs.append((sample_id, full_seq[u5_s:u5_e]))
+
+        manifest_rows.append({
+            'transcript_id': sample_id, 'gene_id': gene_id,
+            'region': 'CDS', 'length': cds_len,
+            'source_file': src, 'seqid': sample_id, 'strand': strand,
+        })
+        cds_recs.append((sample_id, full_seq[cds_s:cds_e]))
+
+        if u3_len > 0:
+            manifest_rows.append({
+                'transcript_id': sample_id, 'gene_id': gene_id,
+                'region': '3UTR', 'length': u3_len,
+                'source_file': src, 'seqid': sample_id, 'strand': strand,
+            })
+            utr3_recs.append((sample_id, full_seq[u3_s:u3_e]))
+
+        # ── GFF3 features ─────────────────────────────────────────────────
+        # seqid = sample_id so each transcript is its own coordinate system.
+        # All positions are 1-based inclusive (GFF3 convention).
+        def _gff(feat, s0, e0, attrs):
+            # s0/e0 are 0-based half-open → GFF3 1-based inclusive
+            return (f"{sample_id}\tsplit_fasta\t{feat}\t{s0+1}\t{e0}"
+                    f"\t.\t{strand}\t.\t{attrs}")
+
+        gff_lines.append(_gff('gene', 0, seq_len,
+                              f'ID={gene_id};gene_id={gene_id}'))
+        gff_lines.append(_gff('mRNA', 0, seq_len,
+                              f'ID={sample_id};Parent={gene_id};'
+                              f'transcript_id={sample_id};gene_id={gene_id}'))
+
+        # Single exon spanning the whole transcript (no introns in
+        # a spliced mRNA built from UTR + CDS parts).
+        gff_lines.append(_gff('exon', 0, seq_len,
+                              f'Parent={sample_id};transcript_id={sample_id}'))
+
+        # CDS feature
+        gff_lines.append(_gff('CDS', cds_s, cds_e,
+                              f'Parent={sample_id};transcript_id={sample_id}'))
+
+        # UTR features (only when non-zero)
+        if u5_len > 0:
+            gff_lines.append(_gff('five_prime_UTR', u5_s, u5_e,
+                                  f'Parent={sample_id};transcript_id={sample_id}'))
+        if u3_len > 0:
+            gff_lines.append(_gff('three_prime_UTR', u3_s, u3_e,
+                                  f'Parent={sample_id};transcript_id={sample_id}'))
+
+        # start_codon / stop_codon (first / last 3 nt of CDS)
+        gff_lines.append(_gff('start_codon', cds_s, cds_s + 3,
+                              f'Parent={sample_id};transcript_id={sample_id}'))
+        gff_lines.append(_gff('stop_codon',  cds_e - 3, cds_e,
+                              f'Parent={sample_id};transcript_id={sample_id}'))
+
+    # ── Write files ───────────────────────────────────────────────────────
+    with open(extract_dir / 'manifest.tsv', 'w', newline='') as fh:
+        w = csv.DictWriter(fh, fieldnames=_MANIFEST_COLS, delimiter='\t',
+                           extrasaction='ignore', lineterminator='\n')
+        w.writeheader()
+        w.writerows(manifest_rows)
+
+    with open(extract_dir / 'canonical.gff', 'w') as fh:
+        fh.write('\n'.join(gff_lines) + '\n')
+
+    _write_fasta(extract_dir / 'extracted_mRNA.fa', mrna_recs)
+    _write_fasta(extract_dir / 'extracted_CDS.fa',  cds_recs)
+    if utr5_recs:
+        _write_fasta(extract_dir / 'extracted_5UTR.fa', utr5_recs)
+    if utr3_recs:
+        _write_fasta(extract_dir / 'extracted_3UTR.fa', utr3_recs)
+
+    log.info(
+        f"extract_dir built: {len(records)} transcripts, "
+        f"{len(utr5_recs)} with 5UTR, {len(utr3_recs)} with 3UTR."
+    )
 
 
-def _build_split_path_context(output_dir: Path, species: str) -> object:
+# ── PathContext shim ──────────────────────────────────────────────────────────
+
+def _build_split_paths(output_dir: Path, species: str) -> object:
     """
     Minimal PathContext shim for split-FASTA runs.
 
-    Exposes the same attributes that metric plugins read from a real
-    PathContext so the plugins need no modification.
+    Exposes every attribute real metric plugins read from a PathContext so
+    plugins need no modification.  Attribute values mirror what the real
+    PathContext would contain for an equivalent dataset-mode run.
     """
-    extract_dir = output_dir / 'extract'
+    extract_dir = output_dir / 'extracted_regions'
 
     class _SplitPaths:
         def __init__(self):
-            # Paths read by GFF-dependent plugins
-            self.canonical_gff = extract_dir / 'canonical.gff'
-            self.manifest_tsv  = extract_dir / 'manifest.tsv'
-            self.extract_dir   = extract_dir
-            # Sequence-only plugins read from here
-            self.fasta_path    = extract_dir / 'extracted_mRNA.fa'
-            # Orchestrator paths
-            self.metrics_dir   = output_dir / 'metrics'
-            self.output_dir    = output_dir
-            self.species       = species
-            self.engineered    = True   # always True: no external GFF
-            self.gff_cache_dir = output_dir / 'gff_cache'
-            self.dataset_yaml  = None
-            self.gff_path      = None
-
-            # Mirror any extra fields from the real PathContext so attribute
-            # lookups on plugins never raise AttributeError.
+            # ── Paths plugins read ────────────────────────────────────────
+            self.extract_dir    = extract_dir
+            self.canonical_gff  = extract_dir / 'canonical.gff'
+            self.manifest_tsv   = extract_dir / 'manifest.tsv'
+            # sequence-only plugins read extracted_mRNA.fa via extract_dir
+            self.fasta_path     = extract_dir / 'extracted_mRNA.fa'
+            # ── Orchestrator ──────────────────────────────────────────────
+            self.metrics_dir    = output_dir / 'metrics'
+            self.output_dir     = output_dir
+            self.run_dir        = output_dir
+            self.species        = species
+            self.engineered     = True   # no external GFF in this mode
+            self.dataset_yaml   = None
+            self.gff_path       = None
+            self.references_root = None
+            # ── Mirror real PathContext fields ────────────────────────────
+            # Prevents AttributeError on any field a plugin happens to read.
             try:
                 import dataclasses as _dc
                 for f in _dc.fields(PathContext):
@@ -402,13 +540,12 @@ def _run_split_fasta_mode(args: argparse.Namespace) -> None:
     """
     Entry point for --fasta-5utr / --fasta-cds / --fasta-3utr runs.
 
-    1. Validate inputs.
-    2. Assemble per-sample transcripts (5UTR + shared CDS + 3UTR).
-    3. Write assembled FASTA with synthesised CDS=/UTR5=/UTR3= header tags.
-    4. Call build_extract_dir() to produce the extract_dir tree that every
-       plugin reads (manifest.tsv, canonical.gff, extracted_*.fa).
-    5. Run all requested plugins — GFF-dependent ones work because
-       canonical.gff is synthesised from the header tags (no download needed).
+    1. Validate the three input paths.
+    2. Assemble per-sample full transcripts (5UTR + shared CDS + 3UTR).
+    3. Write assembled_transcripts.fa (for audit / downstream use).
+    4. Build extract_dir with manifest.tsv, canonical.gff, and split FASTAs
+       so all metric plugins can run without modification.
+    5. Execute all requested plugins.
     """
     path_5utr = Path(args.fasta_5utr).expanduser().resolve()
     path_cds  = Path(args.fasta_cds).expanduser().resolve()
@@ -428,15 +565,13 @@ def _run_split_fasta_mode(args: argparse.Namespace) -> None:
 
     log.info("Split-FASTA mode")
     log.info(f"  5UTR : {path_5utr}")
-    log.info(f"  CDS  : {path_cds}  (shared across all samples — 1 sequence required)")
+    log.info(f"  CDS  : {path_cds}  (shared across all samples — 1 sequence)")
     log.info(f"  3UTR : {path_3utr}")
     log.info(f"  Out  : {output_dir}")
-    log.info(
-        "  Junction / NMD metrics derive from the shared CDS only "
-        "and will be identical for every sample."
-    )
+    log.info("  Junction / NMD metrics are derived from the shared CDS only "
+             "and will be identical for every sample.")
 
-    # ── 1. Assemble transcripts ───────────────────────────────────────────────
+    # 1. Assemble
     try:
         records = _assemble_transcripts(
             path_5utr, path_cds, path_3utr,
@@ -446,33 +581,25 @@ def _run_split_fasta_mode(args: argparse.Namespace) -> None:
         log.error(str(exc))
         sys.exit(1)
 
+    # 2. Write assembled FASTA (audit copy)
     assembled_fa = output_dir / 'assembled_transcripts.fa'
-    _write_assembled_fasta(records, assembled_fa)
+    _write_fasta(assembled_fa, [(r[0], r[1]) for r in records])
+    log.info(f"Assembled FASTA → {assembled_fa}")
 
-    # ── 2. Build extract_dir (manifest, canonical GFF, split FASTAs) ──────────
-    from lib.fasta_to_extract import build_extract_dir
-    try:
-        build_extract_dir(
-            fasta_path=assembled_fa,
-            extract_dir=output_dir / 'extract',
-            reference_gff=None,     # no external GFF; headers carry all coords
-            force=args.force,
-        )
-    except Exception as exc:
-        log.error(f"Failed to build extract_dir: {exc}")
-        sys.exit(1)
+    # 3. Build extract_dir (manifest + canonical.gff + split FASTAs)
+    paths = _build_split_paths(output_dir, args.species)
+    _build_extract_dir(records, assembled_fa, paths.extract_dir, force=args.force)
 
-    # ── 3. Determine which plugins to run ────────────────────────────────────
+    # 4. Determine plugins to run
     if args.metric:
         plugins = {m: {} for m in args.metric}
     else:
         plugins = {n: {} for n in _list_available_plugins()}
 
     if not plugins:
-        log.warning("No plugins found.")
+        log.warning("No plugins found under metrics/.")
         return
 
-    paths = _build_split_path_context(output_dir, args.species)
     _run_plugins(plugins, paths, args.force)
 
 
@@ -486,7 +613,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # ── Mode selection (mutually exclusive) ───────────────────────────────────
+    # ── Mode selection ────────────────────────────────────────────────────
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         '--dataset', '-d',
@@ -501,14 +628,14 @@ def main():
         help="Split-FASTA mode: per-sample 5' UTR sequences.",
     )
 
-    # ── Split-FASTA companions ─────────────────────────────────────────────
+    # ── Split-FASTA companions ────────────────────────────────────────────
     parser.add_argument(
         '--fasta-cds',
         metavar='FILE',
         dest='fasta_cds',
         help=(
-            "Single shared CDS sequence (required with --fasta-5utr).  "
-            "Junction / NMD metrics are computed from this sequence and are "
+            "Single shared CDS sequence (required with --fasta-5utr). "
+            "Junction / NMD metrics are derived from this sequence and are "
             "identical across all samples."
         ),
     )
@@ -517,7 +644,7 @@ def main():
         metavar='FILE',
         dest='fasta_3utr',
         help=(
-            "Per-sample 3' UTR sequences (required with --fasta-5utr).  "
+            "Per-sample 3' UTR sequences (required with --fasta-5utr). "
             "Accession IDs must match --fasta-5utr."
         ),
     )
@@ -527,23 +654,23 @@ def main():
         default=False,
         dest='allow_missing_utrs',
         help=(
-            "Treat samples whose 5UTR / 3UTR partner is absent as having a "
+            "Treat samples whose 5UTR or 3UTR partner is absent as having a "
             "zero-length UTR instead of raising an error."
         ),
     )
     parser.add_argument(
         '--species', '-s',
         metavar='BINOMIAL',
-        help="Species name stored in metadata (e.g. 'Homo sapiens').  "
+        help="Species name stored in run metadata (e.g. 'Homo sapiens'). "
              "Required in split-FASTA mode.",
     )
 
-    # ── Shared options ─────────────────────────────────────────────────────
+    # ── Shared / output options ───────────────────────────────────────────
     parser.add_argument(
         '--output-dir', '-o',
         metavar='DIR',
         help=(
-            "Output directory (split-FASTA mode only).  "
+            "Output directory (split-FASTA mode only). "
             "Defaults to <cds_dir>/metrics_<cds_stem>_split/"
         ),
     )
@@ -552,7 +679,7 @@ def main():
         action='append',
         default=None,
         metavar='NAME',
-        help="Run only this metric (repeatable).  "
+        help="Run only this metric (repeatable). "
              "Default: all enabled (dataset) / all discovered (split-FASTA).",
     )
     parser.add_argument(
@@ -579,20 +706,20 @@ def main():
             print("(no plugins found under metrics/)", file=sys.stderr)
             return
         print("Available plugins:")
-        print(f"  {'Plugin':<30}  {'Needs GFF annotation'}")
-        print(f"  {'-'*30}  {'-'*20}")
+        print(f"  {'Plugin':<32}  GFF-dependent?")
+        print(f"  {'-'*32}  {'-'*42}")
         for p in plugins:
-            marker = 'yes (synthesised from headers in split-FASTA mode)' \
-                     if p in _GFF_DEPENDENT_PLUGINS else 'no'
-            print(f"  {p:<30}  {marker}")
+            note = ('yes  (annotation synthesised from lengths in split-FASTA mode)'
+                    if p in _GFF_DEPENDENT_PLUGINS else 'no')
+            print(f"  {p:<32}  {note}")
         return
 
-    # ── Route ────────────────────────────────────────────────────────────────
+    # ── Route ────────────────────────────────────────────────────────────
     if args.fasta_5utr:
         missing = []
-        if not args.fasta_cds:   missing.append('--fasta-cds')
-        if not args.fasta_3utr:  missing.append('--fasta-3utr')
-        if not args.species:     missing.append('--species')
+        if not args.fasta_cds:  missing.append('--fasta-cds')
+        if not args.fasta_3utr: missing.append('--fasta-3utr')
+        if not args.species:    missing.append('--species')
         if missing:
             parser.error(f"Split-FASTA mode also requires: {', '.join(missing)}")
         _run_split_fasta_mode(args)
@@ -603,8 +730,8 @@ def main():
     else:
         parser.error(
             "Provide one of:\n"
-            "  --dataset NAME                                       (dataset mode)\n"
-            "  --fasta-5utr F --fasta-cds F --fasta-3utr F         (split-FASTA mode)"
+            "  --dataset NAME                                        (dataset mode)\n"
+            "  --fasta-5utr F --fasta-cds F --fasta-3utr F          (split-FASTA mode)"
         )
 
 
