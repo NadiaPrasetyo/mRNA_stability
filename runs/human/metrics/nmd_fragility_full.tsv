@@ -1,0 +1,2 @@
+transcript_id	gene_id	strand	model	cds_length	zone_length	n_transition_fragile_codons	n_transversion_fragile_codons	n_snv_fragile_codons	n_alt_stop_codons	transition_fragile_codon_density	transversion_fragile_codon_density	snv_fragile_codon_density	alt_stop_codon_density	transition_fraction_of_snv_fragile
+ENST00000335295.4	ENSG00000244734	-	full	444	265	3	13	16	11	0.011320754716981131	0.04905660377358491	0.06037735849056604	0.04150943396226415	0.1875

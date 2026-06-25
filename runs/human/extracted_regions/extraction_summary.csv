@@ -1,0 +1,2 @@
+Gene_ID,Transcript_ID,Selection_Reason,Total_Length,CDS_Length,5UTR_Length,3UTR_Length,UTR_pair_Length,Status
+ENSG00000244734,ENST00000335295.4,MANE_Select,628,444,50,134,191,Success

@@ -16,7 +16,7 @@ species: human
 inputs:
   genome_fasta: data/human/GRCh38.primary_assembly.genome.fa
   annotation_gff: data/human/MANE.GRCh38.v1.5.ensembl_genomic.gff
-  gene_list: data/human/assembly_gene_ids.txt
+  gene_list: data/human/hbb_baseline.txt
 
 # References block — paths to species-specific tables consumed by metric
 # plugins. Keys are plugin-defined; only filled in for plugins that need them.

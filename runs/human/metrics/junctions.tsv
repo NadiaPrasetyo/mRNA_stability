@@ -1,0 +1,2 @@
+transcript_id	gene_id	strand	n_exons	n_5UTR_junctions	n_CDS_junctions	n_3UTR_junctions	stop_dist_closest_upstream	stop_dist_closest_downstream	stop_dist_last_downstream	start_dist_closest_upstream	start_dist_closest_downstream
+ENST00000335295.4	ENSG00000244734	-	3	0	2	0	128	NA	NA	NA	92

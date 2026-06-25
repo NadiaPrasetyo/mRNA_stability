@@ -1,0 +1,2 @@
+transcript_id	gene_id	strand	n_exons	n_internal_exons	first_exon_length	last_exon_length	internal_exon_mean	internal_exon_median	internal_exon_sd	intron_mean	intron_median	intron_sd
+ENST00000335295.4	ENSG00000244734	-	3	1	142	263	223.0	223	NA	490.0	490.0	509.11688245431424
