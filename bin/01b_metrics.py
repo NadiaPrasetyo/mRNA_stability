@@ -75,9 +75,7 @@ log = logging.getLogger('metrics')
 _GFF_DEPENDENT_PLUGINS: frozenset[str] = frozenset({
     'architecture',
     'junctions',
-    'nmd_fragility_core',
     'nmd_fragility_full',
-    'nmd_fragility_window',
     'uorf',
 })
 
