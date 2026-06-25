@@ -64,6 +64,79 @@ For planned metrics (`gc_by_position`, `kozak`, `stop_context`,
 `utr3_motifs`) and metrics explicitly out of scope (CAI / CSC, miRNA
 seeds, Nc), see `PLANNED_METRICS.md`.
 
+# Split-FASTA mode — implementation notes
+
+## What changed
+
+Only `01b_metrics.py` was modified. 
+## New CLI
+
+```bash
+./bin/01b_metrics.py \
+    --fasta-5utr  sequences_5utr.fa \
+    --fasta-cds   baseline_cds.fa   \
+    --fasta-3utr  sequences_3utr.fa \
+    --species "Homo sapiens"
+```
+
+Optional flags that also work:
+```bash
+  --output-dir DIR          # default: <cds_dir>/metrics_<cds_stem>_split/
+  --metric junctions        # run only specific plugins (repeatable)
+  --force                   # ignore staleness
+  --allow-missing-utrs      # treat absent 5/3 UTR partner as zero-length
+  -v                        # verbose / debug logging
+```
+
+`--engineered` is accepted for explicitness but is **automatically set** in
+split-FASTA mode — GFF fetch is never needed because all annotation tags are
+synthesised from the UTR/CDS lengths.
+
+## Input rules
+
+| File | Content |
+|------|---------|
+| `--fasta-5utr` | One 5' UTR sequence per sample.  Any FASTA, no special headers needed. |
+| `--fasta-cds`  | **Exactly one** CDS sequence (the shared baseline). |
+| `--fasta-3utr` | One 3' UTR sequence per sample.  Accession IDs must match `--fasta-5utr`. |
+
+## What the code does
+
+1. Reads the single CDS sequence from `--fasta-cds`.
+2. Reads all 5UTR and 3UTR sequences; checks that accession sets match
+   (error unless `--allow-missing-utrs`).
+3. For every sample ID, concatenates:
+   ```
+   full_seq = 5utr_seq + cds_seq + 3utr_seq
+   ```
+4. Writes `<output_dir>/assembled_transcripts.fa` with auto-generated
+   header tags, e.g.:
+   ```
+   >SAMPLE_001|CDS=201..650|UTR5=1..200|UTR3=651..900
+   ```
+   — so `fasta_header_parser.py` can read CDS/UTR boundaries without any
+   changes.
+5. Also writes `<output_dir>/cds_reference.fa` (single annotated CDS
+   record) for inspection/audit; this is **not** consumed by plugins.
+6. Calls `build_extract_dir()` on the assembled FASTA → same extract_dir
+   layout as always.
+7. Runs all requested metric plugins exactly as before.
+
+## Junction behaviour
+
+Because every sample shares the **same CDS sequence at the same offset from
+its own 5' UTR start**, the relative CDS structure (and therefore any
+junction positions within the CDS) is identical across samples.  The only
+thing that varies is the absolute genomic offset caused by different 5' UTR
+lengths — but since the pipeline works in transcript coordinates, junction
+metrics computed from `CDS=` + `EXONS=` tags are consistent.
+
+If the CDS FASTA header contains an `EXONS=` tag, those exon boundaries are
+propagated into every assembled sample header automatically by
+`fasta_to_extract._gff_for_transcript()`.  If no `EXONS=` tag is present,
+the CDS is treated as a single exon (the common case for a synthetic
+baseline CDS).
+
 ### Configuring metrics
 
 In the dataset YAML, enable plugins under a `metrics:` block:
