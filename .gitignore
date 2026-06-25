@@ -9,3 +9,8 @@ RNAstab/.Rproj.user
 RNAstab/models
 .Rproj.user
 RNAstab/.RData
+
+
+data/human/*
+data/mouse/*
+data/bovine/*

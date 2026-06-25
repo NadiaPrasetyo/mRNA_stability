@@ -1,0 +1,5 @@
+transcript_id	gene_id	region	sequence_length	stopfree_length	stopfree_fraction	direction	frame	stopfree_start	stopfree_end	source_start	source_end	n_full_codons_scanned	n_stop_codons
+HBB-201	HBB-201	3UTR	134	75	0.5597014925373134	forward	2	32	106	32	106	132	7
+HBB-201	HBB-201	5UTR	50	50	1.0	forward	1	1	50	1	50	48	2
+HBB-201	HBB-201	CDS	717	717	1.0	forward	1	1	717	1	717	715	13
+HBB-201	HBB-201	mRNA	901	813	0.902330743618202	forward	2	2	814	2	814	899	22

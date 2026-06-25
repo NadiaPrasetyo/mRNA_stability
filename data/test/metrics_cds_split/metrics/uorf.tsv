@@ -1,0 +1,2 @@
+transcript_id	gene_id	utr5_length	n_uorfs	n_overlapping_uorfs	has_uorf	total_classical_uorf_codons	max_classical_uorf_codons	dist_cap_to_first_uatg	dist_last_uorf_stop_to_main_atg
+HBB-201	HBB-201	50	0	0	0	0	NA	NA	NA

@@ -1,0 +1,81 @@
+
+# configs/datasets/example.yaml
+# A "dataset" = (genome, annotation, gene list, region selection,
+#                metric selection).
+# Copy this file to <dataset_name>.yaml; the filename (minus .yaml) is the
+# dataset identifier you pass with --dataset on the CLI.
+#
+# Outputs land at: $RUNS_ROOT/<dataset_name>/extracted_regions/   (01_extract)
+#                  $RUNS_ROOT/<dataset_name>/metrics/             (01b_metrics)
+
+# Species name resolves data/references/<species>/ for metric plugins that
+# need species-specific tables (CSC, CAI codon weights, tRNA copy numbers,
+# etc.). Optional; metrics that don't need references ignore it.
+species: mouse
+
+inputs:
+  genome_fasta: data/mouse/GRCm39.primary_assembly.genome.fa
+  annotation_gff: data/mouse/gencode.vM38.primary_assembly.basic.annotation.gff3
+  gene_list: data/mouse/assembly_gene_ids.txt
+
+# References block — paths to species-specific tables consumed by metric
+# plugins. Keys are plugin-defined; only filled in for plugins that need them.
+# Junctions does not need any references.
+references:
+  # csc_table: data/references/human/csc_presnyak2015.tsv     # for codon_indices
+  # cai_weights: data/references/human/cai_weights.tsv         # for codon_indices
+  # trna_copies: data/references/human/trna_gene_copies.tsv    # for codon_indices
+
+extraction:
+  min_utr_length: 30                # records with shorter UTRs are flagged
+  filter_short_utrs: false          # set true to drop instead of flag
+  codon_flank_length: 30            # +/-N nt around start/stop codons
+  tail_length: 100                  # length of 3' tail region
+  output_mode: multifasta           # 'multifasta' (canonical) or 'individual'
+  isoform_priority:                 # checked in order; first match wins;
+    - "appris_principal_1"          # falls back to longest CDS
+    - "appris_principal_2"
+    - "appris_principal_3"
+    - "Ensembl_canonical"
+    - "MANE_Select"
+  regions_to_extract:
+    - mRNA
+    - CDS
+    - 5UTR
+    - 3UTR
+    - start_codon_region
+    - stop_codon_region
+    - tail_region
+    - UTR_pair                      # 5UTR + linker + 3UTR with cross-pair constraint
+
+  # Settings for the UTR_pair region. Only consulted if 'UTR_pair' appears
+  # in regions_to_extract above. Output is a 3-line FASTA:
+  #   >seqname
+  #   <5UTR><linker><3UTR>
+  #   <<<<<<...xxxxxxx...>>>>>>>
+  # Tools that understand ViennaRNA-style constraints (e.g. RNAfold -C) can
+  # consume this directly; others ignore the constraint line.
+  utr_pair:
+    linker_length: 7
+    linker_char: N
+    constraint_style: cross_pair    # forward-compat: only style supported now
+
+# Metrics — lightweight per-transcript features computed by bin/01b_metrics.py.
+# Each key is a plugin module name (metrics/<name>.py). Set 'enabled: true'
+# to include in a run; metrics with no entry here, or 'enabled: false', are
+# skipped. Per-plugin options live under each plugin's block.
+metrics:
+  junctions:
+    enabled: true
+  architecture:
+    enabled: true
+  sequence_basic:
+    enabled: true
+  codon_aa_counts:
+    enabled: true
+  nmd_fragility_full:
+    enabled: true
+  uorf:
+    enabled: true
+  stopfree:
+    enabled: true

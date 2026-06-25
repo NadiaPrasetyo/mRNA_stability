@@ -1,0 +1,9 @@
+##gff-version 3
+HBB-201	split_fasta	gene	1	901	.	+	.	ID=HBB-201;gene_id=HBB-201
+HBB-201	split_fasta	mRNA	1	901	.	+	.	ID=HBB-201;Parent=HBB-201;transcript_id=HBB-201;gene_id=HBB-201
+HBB-201	split_fasta	exon	1	901	.	+	.	Parent=HBB-201;transcript_id=HBB-201
+HBB-201	split_fasta	CDS	51	767	.	+	.	Parent=HBB-201;transcript_id=HBB-201
+HBB-201	split_fasta	five_prime_UTR	1	50	.	+	.	Parent=HBB-201;transcript_id=HBB-201
+HBB-201	split_fasta	three_prime_UTR	768	901	.	+	.	Parent=HBB-201;transcript_id=HBB-201
+HBB-201	split_fasta	start_codon	51	53	.	+	.	Parent=HBB-201;transcript_id=HBB-201
+HBB-201	split_fasta	stop_codon	765	767	.	+	.	Parent=HBB-201;transcript_id=HBB-201

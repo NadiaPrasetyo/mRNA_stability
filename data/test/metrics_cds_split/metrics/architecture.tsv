@@ -1,0 +1,2 @@
+transcript_id	gene_id	strand	n_exons	n_internal_exons	first_exon_length	last_exon_length	internal_exon_mean	internal_exon_median	internal_exon_sd	intron_mean	intron_median	intron_sd
+HBB-201	HBB-201	+	1	0	901	901	NA	NA	NA	NA	NA	NA

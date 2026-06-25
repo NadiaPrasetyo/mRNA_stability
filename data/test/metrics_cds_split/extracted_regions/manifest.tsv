@@ -1,0 +1,5 @@
+transcript_id	gene_id	region	length	source_file	seqid	strand
+HBB-201	HBB-201	mRNA	901	/projects/health_sciences/bms/biochemistry/gardner_group/nadia/fork_mRNA_stability/data/test/metrics_cds_split/assembled_transcripts.fa	HBB-201	+
+HBB-201	HBB-201	5UTR	50	/projects/health_sciences/bms/biochemistry/gardner_group/nadia/fork_mRNA_stability/data/test/metrics_cds_split/assembled_transcripts.fa	HBB-201	+
+HBB-201	HBB-201	CDS	717	/projects/health_sciences/bms/biochemistry/gardner_group/nadia/fork_mRNA_stability/data/test/metrics_cds_split/assembled_transcripts.fa	HBB-201	+
+HBB-201	HBB-201	3UTR	134	/projects/health_sciences/bms/biochemistry/gardner_group/nadia/fork_mRNA_stability/data/test/metrics_cds_split/assembled_transcripts.fa	HBB-201	+
